@@ -888,7 +888,7 @@
                 return;
             }
 
-            const contestId = 'contest-' + Date.now();
+            const contestId = 'contest-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
 
             try {
                 // Insert contest
