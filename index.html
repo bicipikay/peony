@@ -11,18 +11,18 @@
     <meta name="apple-mobile-web-app-title" content="Peony">
 
     <!-- Favicon for browsers -->
-    <link rel="icon" type="image/x-icon" href="peony/favicon/favicon.ico">
-    <link rel="icon" type="image/png" sizes="32x32" href="peony/favicon/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="peony/favicon/favicon-16x16.png">
+    <link rel="icon" type="image/x-icon" href="/favicon/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon/favicon-16x16.png">
 
     <!-- Apple Touch Icon for iOS home screen -->
-    <link rel="apple-touch-icon" sizes="180x180" href="peony/favicon/apple-touch-icon.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png">
 
     <!-- Android Chrome Icons -->
-    <link rel="icon" type="image/png" sizes="192x192" href="peony/favicon/android-chrome-192x192.png">
-    <link rel="icon" type="image/png" sizes="512x512" href="peony/favicon/android-chrome-512x512.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="/favicon/android-chrome-192x192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="/favicon/android-chrome-512x512.png">
     <!-- PWA Manifest -->
-    <link rel="manifest" href="peony/favicon/site.webmanifest">
+    <link rel="manifest" href="/favicon/site.webmanifest">
 
     <!-- Theme color for mobile browsers -->
     <meta name="theme-color" content="#C77BA6">
@@ -882,40 +882,38 @@
         }
 
         async function finishCreateContest() {
+            if (state.modalProcessing) return;
+            state.modalProcessing = true;
+
             if (state.newContest.images.length === 0) {
                 showAlert('Add at least one image!', '❌');
+                state.modalProcessing = false;
                 return;
             }
-            
-            // Don't generate ID manually - let database do it
-            // const contestId = 'contest-' + Date.now();  // REMOVE THIS
-            
+
             try {
-                // Insert contest WITHOUT specifying ID
                 const contestResponse = await fetch(`${SUPABASE_URL}/rest/v1/contests`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'apikey': SUPABASE_ANON_KEY,
                         'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-                        'Prefer': 'return=representation'  // CHANGED: return the created row
+                        'Prefer': 'return=representation'
                     },
                     body: JSON.stringify({
-                        // id: contestId,  // REMOVE THIS - let DB generate it
                         title: state.newContest.title,
                         created_by: state.user.id
                     })
                 });
-                
-                if (!contestResponse.ok) {
-                    throw new Error('Failed to create contest');
-                }
-                
-                // Get the generated ID from response
-                const createdContest = await contestResponse.json();
-                const contestId = createdContest[0].id;  // Use DB-generated ID
 
-                // Insert images
+                if (!contestResponse.ok) {
+                    throw new Error(`status ${contestResponse.status}`);
+                }
+
+                const createdContest = await contestResponse.json();
+                const contestId = createdContest[0].id;
+
+                // Insert images...
                 const imagesToInsert = state.newContest.images.map((img, i) => ({
                     contest_id: contestId,
                     url: img.url,
@@ -936,16 +934,19 @@
                 });
 
                 if (!imagesResponse.ok) {
-                    throw new Error('Failed to add images');
+                    throw new Error(`status ${imagesResponse.status}`);
                 }
 
                 state.newContest = { title: '', images: [] };
                 await loadContests();
                 state.view = 'home';
+
                 showAlert('Contest created successfully!', '✅');
-            } catch (error) {
-                showAlert('Failed to create contest: ' + error.message, '❌');
+            } catch (err) {
+                showAlert('Failed to create contest: ' + err.message, '❌');
             }
+
+            state.modalProcessing = false;
         }
 
         async function loadImageFromUrl(url) {
