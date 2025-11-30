@@ -1080,6 +1080,53 @@
             }
         }
 
+        // --- ADD: ensureLocalUser (insert this near other helper functions) ---
+        function ensureLocalUser(user) {
+            // returns a Promise that resolves when the user exists (or after insertion)
+            return fetch(`${SUPABASE_URL}/rest/v1/users?id=eq.${user.id}`, {
+                headers: {
+                    'apikey': SUPABASE_ANON_KEY,
+                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                }
+            })
+            .then(r => r.json())
+            .then(rows => {
+                if (rows.length === 0) {
+                    // create the user row in public.users
+                    return fetch(`${SUPABASE_URL}/rest/v1/users`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'apikey': SUPABASE_ANON_KEY,
+                            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                        },
+                        body: JSON.stringify({
+                            id: user.id,
+                            username: user.username,
+                            avatar: user.avatar
+                        })
+                    }).then(resp => {
+                        // If the insert fails, still let caller continue but log error
+                        if (!resp.ok) {
+                            return resp.text().then(t => {
+                                console.error('Failed to insert local user:', t);
+                                // swallow error to avoid locking login flow; caller can handle later
+                                return;
+                            });
+                        }
+                    });
+                }
+                // user already exists: resolve immediately
+                return;
+            })
+            .catch(err => {
+                console.error('ensureLocalUser error:', err);
+                // resolve anyway so login flow continues; caller may show an error later
+                return;
+            });
+        }
+        // --- END ADD ---
+
 
         function startVoting(contest) {
             state.currentContest = contest;
@@ -2733,11 +2780,26 @@
                         } else {
                             // User not banned, proceed with login
                             state.isLoggedIn = true;
-                            state.user = {
-                                id: user.id,
-                                username: user.username,
-                                avatar: user.avatar
+                            // AFTER: ensure user exists, then continue
+                            state.user = { 
+                                id: user.id, 
+                                username: user.username, 
+                                avatar: user.avatar 
                             };
+
+                            // Ensure the row exists in public.users, then continue
+                            ensureLocalUser(state.user)
+                                .then(() => {
+                                    // proceed normally once the user row is present (or insertion attempted)
+                                    loadContests();
+                                    render();
+                                })
+                                .catch((err) => {
+                                    // should not happen because ensureLocalUser swallows errors, but safe fallback
+                                    console.error('ensureLocalUser unexpected error:', err);
+                                    loadContests();
+                                    render();
+                                });
                         }
                     } else {
                         // Token expired, clear it
