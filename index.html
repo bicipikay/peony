@@ -11,19 +11,18 @@
     <meta name="apple-mobile-web-app-title" content="Peony">
 
     <!-- Favicon for browsers -->
-    <link rel="icon" type="image/x-icon" href="/favicon/favicon.ico">
-    <link rel="icon" type="image/png" sizes="32x32" href="/favicon/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/favicon/favicon-16x16.png">
+    <link rel="icon" type="image/x-icon" href="peony/favicon/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="peony/favicon/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="peony/favicon/favicon-16x16.png">
 
     <!-- Apple Touch Icon for iOS home screen -->
-    <link rel="apple-touch-icon" sizes="180x180" href="/favicon/apple-touch-icon.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="peony/favicon/apple-touch-icon.png">
 
     <!-- Android Chrome Icons -->
-    <link rel="icon" type="image/png" sizes="192x192" href="/favicon/android-chrome-192x192.png">
-    <link rel="icon" type="image/png" sizes="512x512" href="/favicon/android-chrome-512x512.png">
-
+    <link rel="icon" type="image/png" sizes="192x192" href="peony/favicon/android-chrome-192x192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="peony/favicon/android-chrome-512x512.png">
     <!-- PWA Manifest -->
-    <link rel="manifest" href="/favicon/site.webmanifest">
+    <link rel="manifest" href="peony/favicon/site.webmanifest">
 
     <!-- Theme color for mobile browsers -->
     <meta name="theme-color" content="#C77BA6">
@@ -887,29 +886,34 @@
                 showAlert('Add at least one image!', '❌');
                 return;
             }
-
-            const contestId = 'contest-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-
+            
+            // Don't generate ID manually - let database do it
+            // const contestId = 'contest-' + Date.now();  // REMOVE THIS
+            
             try {
-                // Insert contest
+                // Insert contest WITHOUT specifying ID
                 const contestResponse = await fetch(`${SUPABASE_URL}/rest/v1/contests`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'apikey': SUPABASE_ANON_KEY,
                         'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-                        'Prefer': 'return=minimal'
+                        'Prefer': 'return=representation'  // CHANGED: return the created row
                     },
                     body: JSON.stringify({
-                        id: contestId,
+                        // id: contestId,  // REMOVE THIS - let DB generate it
                         title: state.newContest.title,
                         created_by: state.user.id
                     })
                 });
-
+                
                 if (!contestResponse.ok) {
                     throw new Error('Failed to create contest');
                 }
+                
+                // Get the generated ID from response
+                const createdContest = await contestResponse.json();
+                const contestId = createdContest[0].id;  // Use DB-generated ID
 
                 // Insert images
                 const imagesToInsert = state.newContest.images.map((img, i) => ({
