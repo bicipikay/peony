@@ -332,17 +332,18 @@
             bannedUsers: [], // Array of user IDs who are banned from app
             allUsers: [], // Track all users who have logged in
             uploadProgress: null, // Upload progress tracking: { files: [{name, status, error, progress}], completed: false }
-            compressionProgress: null, // Compression progress: { files: [{name, status, originalSize, compressedSize, progress, error, canCompressMore, file, previewUrl, currentQuality, currentMaxDimension}], allComplete: false }
             showUserList: false, // Show user list modal (admin only)
             showAdminDashboard: false, // Show admin dashboard modal
             showAppSettingsModal: false, // Show app settings modal (admin only)
             adminStats: { totalVotes: 0, totalUniqueVoters: 0 }, // Admin dashboard statistics
             filters: {
                 createdBy: null,           // Username or null
-                sortBy: 'withFolders',     // 'withFolders', 'newest', 'oldest', 'mostVoted', 'leastVoted', etc.
+                sortBy: 'newest',          // 'newest', 'oldest', 'mostVoted', 'leastVoted'
                 searchQuery: ''            // Search term for contest titles
             },
+            selectedContestsForMerge: [], // Array of contest IDs selected for merging
             mergedResults: null, // Results from merged contests
+            showMergeModal: false, // Show merge contest selection modal
             mergers: [], // Array of merger objects from database
             extracts: [], // Array of extract objects from database
             groups: [], // Array of group objects from database
@@ -357,9 +358,8 @@
             selectedFolderId: null, // Currently selected folder for viewing
             expandedFolderIds: [], // Array of folder IDs that are expanded
             appSettings: {}, // Global app settings (contest creation enabled, revoting enabled)
-            view: 'home',
+            view: 'home', // Can also be 'userProfile'
             viewingUserId: null, // User ID being viewed in profile
-            showUserProfileModal: false, // Show user profile modal
             toast: null, // Toast notification { message, icon }
             isLoading: false,
             loadingMessage: '',
@@ -393,37 +393,6 @@
             state.isLoading = false;
             state.loadingMessage = '';
             render();
-        }
-
-        // ==================== HELPER FUNCTIONS ====================
-
-        // Generic Supabase fetch with cache-busting headers
-        async function fetchFromSupabase(endpoint, options = {}) {
-            const defaultHeaders = {
-                'apikey': SUPABASE_ANON_KEY,
-                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-                'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
-                'Pragma': 'no-cache',
-                'Expires': '0'
-            };
-
-            return fetch(`${SUPABASE_URL}${endpoint}`, {
-                ...options,
-                headers: { ...defaultHeaders, ...options.headers }
-            });
-        }
-
-        // Format date as "day month year" (e.g., "30 Nov 2025")
-        function formatDate(dateString) {
-            if (!dateString) return '';
-            const date = new Date(dateString);
-            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-            return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
-        }
-
-        // Safely stringify JSON for HTML attributes
-        function safeStringify(obj) {
-            return JSON.stringify(obj).replace(/'/g, "&apos;");
         }
 
         // ==================== TOAST NOTIFICATIONS ====================
@@ -479,24 +448,24 @@
             // Special styling for missing votes - black text on dark gray background
             if (isMissing) return { color: 'text-black', bg: 'bg-gray-400', textColor: 'rgb(0, 0, 0)', bgColor: 'rgb(156, 163, 175)' };
 
-            // Blue (4.5-5.0) - matches View Results button color
-            if (min >= 4.5) return { color: 'text-blue-600', bg: 'bg-blue-50', textColor: 'rgb(37, 99, 235)', bgColor: 'rgb(239, 246, 255)' };
-            // Cyan (4.0-4.49) - blue-green/aqua
-            if (min >= 4.0) return { color: 'text-cyan-600', bg: 'bg-cyan-50', textColor: 'rgb(8, 145, 178)', bgColor: 'rgb(236, 254, 255)' };
-            // Green (3.5-3.99) - pure green
-            if (min >= 3.5) return { color: 'text-green-600', bg: 'bg-green-50', textColor: 'rgb(22, 163, 74)', bgColor: 'rgb(240, 253, 244)' };
-            // Lime (3.0-3.49) - yellow-green
-            if (min >= 3.0) return { color: 'text-lime-600', bg: 'bg-lime-100', textColor: 'rgb(101, 163, 13)', bgColor: 'rgb(236, 252, 203)' };
-            // Yellow (2.5-2.99) - pure yellow
-            if (min >= 2.5) return { color: 'text-yellow-600', bg: 'bg-yellow-50', textColor: 'rgb(202, 138, 4)', bgColor: 'rgb(254, 252, 232)' };
-            // Light orange (2.0-2.49) - yellow-orange
-            if (min >= 2.0) return { color: 'text-orange-500', bg: 'bg-orange-100', textColor: 'rgb(249, 115, 22)', bgColor: 'rgb(255, 237, 213)' };
-            // Orange (1.5-1.99) - pure orange
-            if (min >= 1.5) return { color: 'text-orange-600', bg: 'bg-orange-200', textColor: 'rgb(234, 88, 12)', bgColor: 'rgb(254, 215, 170)' };
-            // Red (1.0-1.49) - pure red
-            if (min >= 1.0) return { color: 'text-red-600', bg: 'bg-red-200', textColor: 'rgb(220, 38, 38)', bgColor: 'rgb(254, 202, 202)' };
+            // Bright green with cyan/blue undertone for top scores (5.0)
+            if (min >= 4.5) return { color: 'text-emerald-800', bg: 'bg-emerald-200', textColor: 'rgb(6, 95, 70)', bgColor: 'rgb(167, 243, 208)' };
+            // Lime green (4.5)
+            if (min >= 4.0) return { color: 'text-lime-800', bg: 'bg-lime-200', textColor: 'rgb(63, 98, 18)', bgColor: 'rgb(217, 249, 157)' };
+            // Yellow-green blend (4.0)
+            if (min >= 3.5) return { color: 'text-lime-700', bg: 'bg-lime-200', textColor: 'rgb(77, 124, 15)', bgColor: 'rgb(217, 249, 157)' };
+            // Yellow with green hint (3.5)
+            if (min >= 3.0) return { color: 'text-yellow-800', bg: 'bg-yellow-200', textColor: 'rgb(133, 77, 14)', bgColor: 'rgb(254, 240, 138)' };
+            // Orange-yellow blend (3.0)
+            if (min >= 2.5) return { color: 'text-orange-700', bg: 'bg-orange-200', textColor: 'rgb(194, 65, 12)', bgColor: 'rgb(254, 215, 170)' };
+            // Orange (2.5)
+            if (min >= 2.0) return { color: 'text-orange-800', bg: 'bg-orange-200', textColor: 'rgb(154, 52, 18)', bgColor: 'rgb(254, 215, 170)' };
+            // Red-orange blend (2.0)
+            if (min >= 1.5) return { color: 'text-red-700', bg: 'bg-red-200', textColor: 'rgb(185, 28, 28)', bgColor: 'rgb(254, 202, 202)' };
+            // Red (1.0)
+            if (min >= 1.0) return { color: 'text-red-800', bg: 'bg-red-200', textColor: 'rgb(153, 27, 27)', bgColor: 'rgb(254, 202, 202)' };
             // Fallback for any edge cases
-            return { color: 'text-gray-600', bg: 'bg-gray-50', textColor: 'rgb(75, 85, 99)', bgColor: 'rgb(249, 250, 251)' };
+            return { color: 'text-gray-600', bg: 'bg-gray-200', textColor: 'rgb(75, 85, 99)', bgColor: 'rgb(229, 231, 235)' };
         }
 
 
@@ -604,98 +573,6 @@
                 console.error('Full error details:', error);
                 console.error('Error message:', error.message);
                 showAlert('Error: ' + error.message, '❌');
-            } finally {
-                clearLoading();
-            }
-        }
-
-        async function loadMergedResults(contestIds) {
-            setLoading('Loading merged results...');
-            try {
-                // Fetch contests with their images
-                const contestsResponse = await fetch(`${SUPABASE_URL}/rest/v1/contests?id=in.(${contestIds.join(',')})&select=*,images(*)`, {
-                    headers: {
-                        'apikey': SUPABASE_ANON_KEY,
-                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-                        'Cache-Control': 'no-cache'
-                    }
-                });
-                const contests = await contestsResponse.json();
-
-                // Fetch all votes for these contests
-                const votesResponse = await fetch(`${SUPABASE_URL}/rest/v1/votes?contest_id=in.(${contestIds.join(',')})&limit=10000&select=*,voter:users!votes_user_id_fkey(username,avatar,is_banned)`, {
-                    headers: {
-                        'apikey': SUPABASE_ANON_KEY,
-                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-                        'Cache-Control': 'no-cache'
-                    }
-                });
-                const allVotes = await votesResponse.json();
-
-                // Build image scores from votes
-                const imageScores = {};
-                allVotes.forEach(vote => {
-                    if (!imageScores[vote.image_id]) {
-                        imageScores[vote.image_id] = {
-                            scores: [],
-                            breakdown: []
-                        };
-                    }
-
-                    const isBlocked = vote.is_blocked || false;
-                    const voterIsBanned = vote.voter?.is_banned || false;
-
-                    // Only include non-blocked AND non-banned votes in score calculations
-                    if (!isBlocked && !voterIsBanned) {
-                        imageScores[vote.image_id].scores.push(vote.score);
-                    }
-
-                    // Include ALL votes in breakdown
-                    imageScores[vote.image_id].breakdown.push({
-                        userId: vote.user_id,
-                        username: vote.voter.username,
-                        avatar: vote.voter.avatar,
-                        score: vote.score,
-                        isCurrentUser: vote.user_id === state.user?.id,
-                        isBlocked: isBlocked,
-                        isBanned: voterIsBanned
-                    });
-                });
-
-                // Collect all images from all contests
-                const allImages = [];
-                const contestTitles = [];
-
-                contests.forEach(contest => {
-                    contestTitles.push(contest.title);
-                    contest.images.forEach(img => {
-                        const scores = imageScores[img.id]?.scores || [];
-                        const sum = scores.reduce((acc, s) => acc + s, 0);
-                        const average = scores.length > 0 ? parseFloat((sum / scores.length).toFixed(2)) : 0;
-
-                        allImages.push({
-                            id: img.id,
-                            url: img.url,
-                            author: img.author,
-                            contestId: contest.id,
-                            contestTitle: contest.title,
-                            averageScore: average,
-                            totalVotes: scores.length,
-                            voteBreakdown: imageScores[img.id]?.breakdown || []
-                        });
-                    });
-                });
-
-                // Set merged results
-                state.mergedResults = {
-                    contestIds: contestIds,
-                    contestTitles: contestTitles,
-                    images: allImages.sort((a, b) => b.averageScore - a.averageScore)
-                };
-
-            } catch (error) {
-                console.error('Error loading merged results:', error);
-                showAlert('Error loading merged results: ' + error.message, '❌');
             } finally {
                 clearLoading();
             }
@@ -843,24 +720,6 @@
                 type: 'alert',
                 icon,
                 message,
-                buttons: [{ text: 'OK', action: 'closeModal', primary: true }]
-            });
-        }
-
-        function showContestCreationDisabledModal() {
-            showModal({
-                type: 'alert',
-                icon: '🔒',
-                message: 'Contest creation is temporarily disabled. Contact admin for more information.',
-                buttons: [{ text: 'OK', action: 'closeModal', primary: true }]
-            });
-        }
-
-        function showRevotingDisabledModal() {
-            showModal({
-                type: 'alert',
-                icon: '🔒',
-                message: 'Revoting is temporarily disabled. Contact admin for more information.',
                 buttons: [{ text: 'OK', action: 'closeModal', primary: true }]
             });
         }
@@ -1331,33 +1190,27 @@
             }
         }
 
-        // Format file size in human-readable format
-        function formatFileSize(bytes) {
-            if (bytes < 1024) return bytes + ' B';
-            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-        }
-
-        // Comprehensive image compression targeting 500 KB
-        async function compressImage(file, maxSizeKB = 500, progressCallback = null, currentQuality = null, currentMaxDimension = null) {
-            const maxSizeBytes = maxSizeKB * 1024; // 500 KB = 512000 bytes
-
+        async function compressImage(file) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
 
                 reader.onload = (e) => {
                     const img = new Image();
 
-                    img.onload = async () => {
+                    img.onload = () => {
                         const canvas = document.createElement('canvas');
                         const ctx = canvas.getContext('2d');
+
+                        let width = img.width;
+                        let height = img.height;
+                        let currentMaxSize = 1920; // Start with 1920px max
 
                         // Helper to resize and draw
                         const drawResized = (maxSize) => {
                             let w = img.width;
                             let h = img.height;
 
-                            if (maxSize && (w > maxSize || h > maxSize)) {
+                            if (w > maxSize || h > maxSize) {
                                 if (w > h) {
                                     h = (h * maxSize) / w;
                                     w = maxSize;
@@ -1373,100 +1226,68 @@
                             return { w, h };
                         };
 
-                        // Helper to try compression with specific quality and size
-                        const tryCompress = (quality, maxDimension) => {
-                            return new Promise((res) => {
-                                drawResized(maxDimension);
-                                canvas.toBlob((blob) => {
-                                    if (blob) {
-                                        res({ blob, quality, maxDimension });
+                        // Try quality 0.7 first with original size (up to 1920px)
+                        drawResized(1920);
+
+                        canvas.toBlob((blob) => {
+                            if (blob && blob.size <= 200 * 1024) {
+                                // Success with quality 0.7
+                                const compressedFile = new File([blob], file.name, {
+                                    type: 'image/jpeg',
+                                    lastModified: Date.now()
+                                });
+                                resolve({
+                                    file: compressedFile,
+                                    originalSize: file.size,
+                                    compressedSize: blob.size
+                                });
+                                return;
+                            }
+
+                            // Try resizing to 2000px max with quality 0.7
+                            drawResized(2000);
+                            canvas.toBlob((blob2) => {
+                                if (blob2 && blob2.size <= 200 * 1024) {
+                                    // Success with 2000px max
+                                    const compressedFile = new File([blob2], file.name, {
+                                        type: 'image/jpeg',
+                                        lastModified: Date.now()
+                                    });
+                                    resolve({
+                                        file: compressedFile,
+                                        originalSize: file.size,
+                                        compressedSize: blob2.size
+                                    });
+                                    return;
+                                }
+
+                                // Try quality 0.5 with 2000px max
+                                canvas.toBlob((blob3) => {
+                                    if (blob3 && blob3.size <= 200 * 1024) {
+                                        // Success with quality 0.5
+                                        const compressedFile = new File([blob3], file.name, {
+                                            type: 'image/jpeg',
+                                            lastModified: Date.now()
+                                        });
+                                        resolve({
+                                            file: compressedFile,
+                                            originalSize: file.size,
+                                            compressedSize: blob3.size
+                                        });
                                     } else {
-                                        res(null);
+                                        // Failed - still too large
+                                        reject(new Error('Image too large to compress under 200KB. Please use a smaller image.'));
                                     }
-                                }, 'image/jpeg', quality);
-                            });
-                        };
-
-                        let result = null;
-                        let finalQuality = currentQuality || 0.8;
-                        let finalMaxDimension = currentMaxDimension || null;
-
-                        // If specific parameters provided (for "Compress More"), use them
-                        if (currentQuality !== null || currentMaxDimension !== null) {
-                            result = await tryCompress(finalQuality, finalMaxDimension);
-                        } else {
-                            // Step 1: Try quality reduction first (no resizing)
-                            const qualityLevels = [0.8, 0.7, 0.6, 0.5];
-                            for (const quality of qualityLevels) {
-                                if (progressCallback) progressCallback(20 + (quality - 0.5) * 20);
-                                result = await tryCompress(quality, null);
-                                if (result && result.blob.size <= maxSizeBytes) {
-                                    finalQuality = quality;
-                                    finalMaxDimension = null;
-                                    break;
-                                }
-                            }
-
-                            // Step 2: If quality reduction insufficient, try resizing
-                            if (!result || result.blob.size > maxSizeBytes) {
-                                const resizeStrategies = [
-                                    { maxDim: 2000, quality: 0.6 },
-                                    { maxDim: 1500, quality: 0.5 },
-                                    { maxDim: 1200, quality: 0.5 },
-                                    { maxDim: 1000, quality: 0.4 },
-                                    { maxDim: 800, quality: 0.4 }
-                                ];
-
-                                for (const strategy of resizeStrategies) {
-                                    if (progressCallback) progressCallback(50 + resizeStrategies.indexOf(strategy) * 10);
-                                    result = await tryCompress(strategy.quality, strategy.maxDim);
-                                    if (result && result.blob.size <= maxSizeBytes) {
-                                        finalQuality = strategy.quality;
-                                        finalMaxDimension = strategy.maxDim;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-
-                        if (progressCallback) progressCallback(100);
-
-                        // Check final result
-                        if (result && result.blob.size <= maxSizeBytes) {
-                            const compressedFile = new File([result.blob], file.name, {
-                                type: 'image/jpeg',
-                                lastModified: Date.now()
-                            });
-                            const savingsPercent = Math.round((1 - result.blob.size / file.size) * 100);
-                            resolve({
-                                file: compressedFile,
-                                originalSize: file.size,
-                                compressedSize: result.blob.size,
-                                savingsPercent,
-                                currentQuality: finalQuality,
-                                currentMaxDimension: finalMaxDimension,
-                                success: true
-                            });
-                        } else {
-                            // Failed to compress under limit
-                            const finalSize = result ? result.blob.size : file.size;
-                            reject({
-                                message: `${file.name}: ${formatFileSize(finalSize)} - too large even after compression (max ${maxSizeKB} KB)`,
-                                file: result ? new File([result.blob], file.name, { type: 'image/jpeg', lastModified: Date.now() }) : file,
-                                originalSize: file.size,
-                                compressedSize: finalSize,
-                                success: false,
-                                currentQuality: finalQuality,
-                                currentMaxDimension: finalMaxDimension
-                            });
-                        }
+                                }, 'image/jpeg', 0.5);
+                            }, 'image/jpeg', 0.7);
+                        }, 'image/jpeg', 0.7);
                     };
 
-                    img.onerror = () => reject({ message: 'Failed to load image for compression', success: false });
+                    img.onerror = () => reject(new Error('Failed to load image for compression'));
                     img.src = e.target.result;
                 };
 
-                reader.onerror = () => reject({ message: 'Failed to read image file', success: false });
+                reader.onerror = () => reject(new Error('Failed to read image file'));
                 reader.readAsDataURL(file);
             });
         }
@@ -1504,71 +1325,29 @@
                 return;
             }
 
-            fileInput.value = '';
-
-            // Initialize compression progress state
-            state.compressionProgress = {
-                files: files.map(file => ({
-                    name: file.name,
-                    status: 'compressing', // 'compressing', 'complete', 'failed'
-                    originalSize: file.size,
-                    compressedSize: null,
-                    progress: 0,
-                    error: null,
-                    canCompressMore: false,
-                    file: null,
-                    previewUrl: null,
-                    savingsPercent: 0,
-                    currentQuality: null,
-                    currentMaxDimension: null,
-                    originalFile: file
-                })),
-                allComplete: false
-            };
-
-            render();
-
-            // Compress all files
-            for (let i = 0; i < files.length; i++) {
-                const file = files[i];
-                const fileState = state.compressionProgress.files[i];
-
-                try {
-                    const result = await compressImage(file, 500, (progress) => {
-                        fileState.progress = progress;
-                        render();
-                    });
-
-                    // Success
-                    fileState.status = 'complete';
-                    fileState.compressedSize = result.compressedSize;
-                    fileState.file = result.file;
-                    fileState.previewUrl = URL.createObjectURL(result.file);
-                    fileState.savingsPercent = result.savingsPercent;
-                    fileState.currentQuality = result.currentQuality;
-                    fileState.currentMaxDimension = result.currentMaxDimension;
-                    fileState.canCompressMore = result.currentQuality > 0.3 || result.currentMaxDimension === null || result.currentMaxDimension > 800;
-                    fileState.progress = 100;
-                } catch (error) {
-                    // Failed
-                    fileState.status = 'failed';
-                    fileState.error = error.message || 'Compression failed';
-                    fileState.compressedSize = error.compressedSize || file.size;
-                    fileState.currentQuality = error.currentQuality;
-                    fileState.currentMaxDimension = error.currentMaxDimension;
-                    // Store the best attempt even if it failed
-                    if (error.file) {
-                        fileState.file = error.file;
-                        fileState.previewUrl = URL.createObjectURL(error.file);
-                    }
-                    fileState.progress = 100;
-                }
-
-                render();
+            // Show warning if any files need compression
+            const largeFiles = files.filter(file => file.size > 200 * 1024);
+            if (largeFiles.length > 0) {
+                showToast('⚠️ Image will be compressed during contest creation', 'info');
             }
 
-            // All files processed
-            state.compressionProgress.allComplete = true;
+            // Store files locally with preview URLs (no upload yet)
+            files.forEach(file => {
+                const previewUrl = URL.createObjectURL(file);
+                const imageCount = state.newContest.images.length + 1;
+                state.newContest.images.push({
+                    id: Date.now() + Math.random(),
+                    url: previewUrl,
+                    localFile: file,
+                    isLocalFile: true,
+                    author: null,
+                    isFileUpload: true,
+                    label: `${imageCount}`
+                });
+            });
+
+            fileInput.value = '';
+            showToast(`${files.length} image${files.length !== 1 ? 's' : ''} added successfully!`, 'success');
             render();
         }
 
@@ -1770,142 +1549,6 @@
             return errorMsg;
         }
 
-        // Compression modal helper functions
-        function closeCompressionModal() {
-            if (!state.compressionProgress || !state.compressionProgress.allComplete) return;
-
-            const isAdmin = state.user && state.user.id === ADMIN_DISCORD_ID;
-
-            // Add successfully compressed images to contest
-            state.compressionProgress.files.forEach((fileState, index) => {
-                if (fileState.status === 'complete' || (fileState.status === 'failed' && isAdmin && fileState.adminBypass)) {
-                    const imageCount = state.newContest.images.length + 1;
-                    state.newContest.images.push({
-                        id: Date.now() + Math.random() + index,
-                        url: fileState.previewUrl,
-                        localFile: fileState.file,
-                        isLocalFile: true,
-                        author: null,
-                        isFileUpload: true,
-                        label: `${imageCount}`,
-                        compressedSize: fileState.compressedSize
-                    });
-                }
-            });
-
-            const successCount = state.compressionProgress.files.filter(f =>
-                f.status === 'complete' || (f.status === 'failed' && f.adminBypass)
-            ).length;
-
-            state.compressionProgress = null;
-            render();
-
-            if (successCount > 0) {
-                showToast(`${successCount} image${successCount > 1 ? 's' : ''} added to contest!`, '✅');
-            }
-        }
-
-        async function compressMoreImage(fileIndex) {
-            const fileState = state.compressionProgress.files[fileIndex];
-            if (!fileState || !fileState.originalFile) return;
-
-            // Determine next compression level
-            let newQuality = fileState.currentQuality;
-            let newMaxDimension = fileState.currentMaxDimension;
-
-            if (newQuality > 0.3) {
-                // Try lower quality
-                newQuality = Math.max(0.3, newQuality - 0.1);
-            } else if (newMaxDimension === null || newMaxDimension > 800) {
-                // Start resizing or go smaller
-                if (newMaxDimension === null) {
-                    newMaxDimension = 2000;
-                } else if (newMaxDimension > 1500) {
-                    newMaxDimension = 1500;
-                } else if (newMaxDimension > 1200) {
-                    newMaxDimension = 1200;
-                } else if (newMaxDimension > 1000) {
-                    newMaxDimension = 1000;
-                } else {
-                    newMaxDimension = 800;
-                }
-                newQuality = 0.4;
-            } else {
-                // Already at minimum
-                showToast('Already at minimum compression settings', 'info');
-                return;
-            }
-
-            // Reset state for recompression
-            fileState.status = 'compressing';
-            fileState.progress = 0;
-            render();
-
-            try {
-                const result = await compressImage(fileState.originalFile, 500, (progress) => {
-                    fileState.progress = progress;
-                    render();
-                }, newQuality, newMaxDimension);
-
-                // Success
-                fileState.status = 'complete';
-                fileState.compressedSize = result.compressedSize;
-                fileState.file = result.file;
-                if (fileState.previewUrl) URL.revokeObjectURL(fileState.previewUrl);
-                fileState.previewUrl = URL.createObjectURL(result.file);
-                fileState.savingsPercent = result.savingsPercent;
-                fileState.currentQuality = result.currentQuality;
-                fileState.currentMaxDimension = result.currentMaxDimension;
-                fileState.canCompressMore = result.currentQuality > 0.3 || result.currentMaxDimension === null || result.currentMaxDimension > 800;
-                fileState.progress = 100;
-            } catch (error) {
-                // Failed
-                fileState.status = 'failed';
-                fileState.error = error.message || 'Compression failed';
-                fileState.compressedSize = error.compressedSize || fileState.originalFile.size;
-                fileState.currentQuality = error.currentQuality;
-                fileState.currentMaxDimension = error.currentMaxDimension;
-                if (error.file) {
-                    if (fileState.previewUrl) URL.revokeObjectURL(fileState.previewUrl);
-                    fileState.file = error.file;
-                    fileState.previewUrl = URL.createObjectURL(error.file);
-                }
-                fileState.progress = 100;
-            }
-
-            render();
-        }
-
-        function cancelCompressionImage(fileIndex) {
-            if (!state.compressionProgress) return;
-
-            // Remove the file from compression progress
-            state.compressionProgress.files.splice(fileIndex, 1);
-
-            // Check if all remaining files are complete
-            if (state.compressionProgress.files.length === 0) {
-                state.compressionProgress = null;
-            } else {
-                state.compressionProgress.allComplete = state.compressionProgress.files.every(
-                    f => f.status === 'complete' || f.status === 'failed'
-                );
-            }
-
-            render();
-        }
-
-        function addOversizedImageAnyway(fileIndex) {
-            const isAdmin = state.user && state.user.id === ADMIN_DISCORD_ID;
-            if (!isAdmin || !state.compressionProgress) return;
-
-            const fileState = state.compressionProgress.files[fileIndex];
-            if (!fileState || fileState.status !== 'failed') return;
-
-            // Mark as admin bypass
-            fileState.adminBypass = true;
-            render();
-        }
-
         function handleDragOver(event) {
             event.preventDefault();
             event.stopPropagation();
@@ -2011,6 +1654,70 @@
                 showToast('🔗 Contest link copied!', 'success');
             } catch (error) {
                 console.error('Failed to copy link:', error);
+                showToast('Failed to copy link', 'error');
+            }
+        }
+
+        function toggleContestSelection(contestId) {
+            const index = state.selectedContestsForMerge.indexOf(contestId);
+            if (index > -1) {
+                state.selectedContestsForMerge.splice(index, 1);
+            } else {
+                state.selectedContestsForMerge.push(contestId);
+            }
+            render();
+        }
+
+        function openMergeModal() {
+            // Initialize with current contest pre-selected
+            if (state.currentContest) {
+                state.selectedContestsForMerge = [state.currentContest.id];
+            }
+            state.showMergeModal = true;
+            render();
+        }
+
+        function closeMergeModal() {
+            state.showMergeModal = false;
+            state.selectedContestsForMerge = [];
+            render();
+        }
+
+        async function viewSelectedMerge() {
+            if (state.selectedContestsForMerge.length < 2) {
+                showAlert('Please select at least 2 contests to merge', '❌');
+                return;
+            }
+
+            state.showMergeModal = false;
+            await loadSharedMerge(state.selectedContestsForMerge.join(','));
+        }
+
+        async function copyMergeLink() {
+            if (!state.mergedResults || !state.mergedResults.contestIds) {
+                showAlert('No merge data available', '❌');
+                return;
+            }
+
+            try {
+                const shareUrl = `${window.location.origin}${window.location.pathname}#merge=${state.mergedResults.contestIds.join(',')}`;
+
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(shareUrl);
+                } else {
+                    const textArea = document.createElement('textarea');
+                    textArea.value = shareUrl;
+                    textArea.style.position = 'fixed';
+                    textArea.style.left = '-9999px';
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textArea);
+                }
+
+                showToast('🔗 Merge link copied!', 'success');
+            } catch (error) {
+                console.error('Failed to copy merge link:', error);
                 showToast('Failed to copy link', 'error');
             }
         }
@@ -2143,6 +1850,135 @@
             }
         }
 
+        async function viewMerge() {
+            if (state.selectedContestsForMerge.length < 2) {
+                showAlert('Please select at least 2 contests to merge', '❌');
+                return;
+            }
+
+            // Convert UUIDs to contest numbers for the URL
+            const contestNumbers = state.selectedContestsForMerge.map(id => {
+                const contest = state.contests.find(c => c.id === id);
+                return contest ? contest.contestNumber : null;
+            }).filter(n => n !== null);
+
+            await loadSharedMerge(contestNumbers.join(','));
+        }
+
+        async function loadSharedMerge(contestIdsStr) {
+            try {
+                console.log('Loading merged contests:', contestIdsStr);
+
+                const inputIds = contestIdsStr.split(',').map(id => id.trim());
+
+                if (inputIds.length < 2) {
+                    showAlert('At least 2 contests are required for merging', '❌');
+                    return;
+                }
+
+                state.isLoading = true;
+                state.loadingMessage = 'Loading merged results...';
+                render();
+
+                // Check if inputs are contest numbers (numeric) or UUIDs
+                const isNumeric = inputIds.every(id => /^\d+$/.test(id));
+                let contestIds;
+
+                if (isNumeric) {
+                    // Convert contest numbers to UUIDs
+                    const contestNumbers = inputIds.map(n => parseInt(n));
+                    const lookupResponse = await fetch(`${SUPABASE_URL}/rest/v1/contests?contest_number=in.(${contestNumbers.join(',')})&select=id,contest_number`, {
+                        headers: {
+                            'apikey': SUPABASE_ANON_KEY,
+                            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                        }
+                    });
+
+                    if (!lookupResponse.ok) {
+                        throw new Error('Failed to lookup contests by number');
+                    }
+
+                    const contestsData = await lookupResponse.json();
+                    contestIds = contestsData.map(c => c.id);
+
+                    if (contestIds.length < 2) {
+                        showAlert('Could not find all contests. Please check the contest numbers.', '❌');
+                        state.isLoading = false;
+                        render();
+                        return;
+                    }
+                } else {
+                    // Already UUIDs, use as-is
+                    contestIds = inputIds;
+                }
+
+                // Call the PostgreSQL function to get merged results
+                const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_merged_contest_results`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'apikey': SUPABASE_ANON_KEY,
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                    },
+                    body: JSON.stringify({ contest_ids: contestIds })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch merged results: ${response.statusText}`);
+                }
+
+                const mergedData = await response.json();
+
+                if (!mergedData || mergedData.length === 0) {
+                    showAlert('No results found for the selected contests', '❌');
+                    state.isLoading = false;
+                    render();
+                    return;
+                }
+
+                // Fetch contest details for titles
+                const contestDetailsResponse = await fetch(`${SUPABASE_URL}/rest/v1/contests?id=in.(${contestIds.join(',')})&select=id,title`, {
+                    headers: {
+                        'apikey': SUPABASE_ANON_KEY,
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                    }
+                });
+
+                const contestDetails = await contestDetailsResponse.json();
+                const contestTitles = {};
+                contestDetails.forEach(c => {
+                    contestTitles[c.id] = c.title;
+                });
+
+                // Transform the data for display
+                state.mergedResults = {
+                    contestIds: contestIds,
+                    contestTitles: contestTitles,
+                    images: mergedData.map(item => ({
+                        id: item.image_id,
+                        url: item.image_url,
+                        contestId: item.contest_id,
+                        averageScore: parseFloat(item.average_score).toFixed(2),
+                        totalVotes: item.total_votes,
+                        voteBreakdown: item.vote_breakdown
+                    }))
+                };
+
+                state.view = 'mergedResults';
+                state.isLoading = false;
+
+                // Update URL hash with merge
+                window.location.hash = `merge=${contestIds.join(',')}`;
+
+                render();
+            } catch (error) {
+                console.error('Error loading merged results:', error);
+                showAlert('Failed to load merged results: ' + error.message, '❌');
+                state.isLoading = false;
+                render();
+            }
+        }
+
         async function loadSharedContest(contestId) {
             try {
                 console.log('Loading shared contest:', contestId);
@@ -2222,6 +2058,27 @@
 
             console.log('🔗 [NAVIGATION] Hash changed:', hash);
 
+            // Check for merge link: #merge=1,2,3
+            if (hash.startsWith('merge=')) {
+                const mergeValue = hash.replace('merge=', '');
+
+                // Check if it's a new-style merge (comma-separated numbers)
+                if (/^\d+(,\d+)*$/.test(mergeValue)) {
+                    console.log('🔗 [NAVIGATION] Detected new-style merge link');
+                    const contestNumbers = mergeValue.split(',').map(n => parseInt(n.trim()));
+                    loadMergedContestsFromNumbers(contestNumbers);
+                    return;
+                }
+                // Old-style merge (UUID) - kept for backward compatibility
+                else {
+                    console.log('🔗 [NAVIGATION] Detected old-style merge link');
+                    if (state.isLoggedIn) {
+                        loadSharedMerge(mergeValue);
+                    }
+                    return;
+                }
+            }
+
             // Check for single contest share: #contest={uuid}
             const params = new URLSearchParams(hash);
             const contestId = params.get('contest');
@@ -2281,9 +2138,16 @@
                         const img = localFilesToUpload[i];
                         setLoading(`Uploading images (${i + 1}/${localFilesToUpload.length})...`);
 
-                        // Images are already compressed during upload phase
+                        // Compress if needed
+                        let fileToUpload = img.localFile;
+                        if (img.localFile.size > 200 * 1024) {
+                            setLoading(`Compressing image ${i + 1}/${localFilesToUpload.length}...`);
+                            const compressed = await compressImage(img.localFile);
+                            fileToUpload = compressed.file;
+                        }
+
                         // Upload to storage
-                        const uploadedUrl = await uploadImageFile(img.localFile);
+                        const uploadedUrl = await uploadImageFile(fileToUpload);
                         uploadedUrls.push(uploadedUrl);
 
                         // Update the image URL in state
@@ -2460,7 +2324,15 @@
         async function loadContests() {
             setLoading('Loading contests...');
             try {
-                const response = await fetchFromSupabase('/rest/v1/contests?select=*,images(*),creator:users!contests_created_by_fkey(username,avatar)&order=created_at.desc');
+                const response = await fetch(`${SUPABASE_URL}/rest/v1/contests?select=*,images(*),creator:users!contests_created_by_fkey(username,avatar)&order=created_at.desc`, {
+                    headers: {
+                        'apikey': SUPABASE_ANON_KEY,
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+                        'Pragma': 'no-cache',
+                        'Expires': '0'
+                    }
+                });
 
                 const contests = await response.json();
 
@@ -2471,7 +2343,15 @@
                 }
 
                 // Fetch voter counts from the pre-calculated PostgreSQL view
-                const voterCountsResponse = await fetchFromSupabase('/rest/v1/contest_voter_counts?select=*');
+                const voterCountsResponse = await fetch(`${SUPABASE_URL}/rest/v1/contest_voter_counts?select=*`, {
+                    headers: {
+                        'apikey': SUPABASE_ANON_KEY,
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+                        'Pragma': 'no-cache',
+                        'Expires': '0'
+                    }
+                });
 
                 if (!voterCountsResponse.ok) {
                     console.error('Failed to fetch voter counts');
@@ -2903,7 +2783,7 @@
 
                 // Update local state only if database update succeeded
                 contest.resultsPublic = newPublicStatus;
-                showAlert(contest.resultsPublic ? '👁️ Results public - Everyone can view' : '🔒 Results hidden - Only you can view', contest.resultsPublic ? '👁️' : '🔒');
+                showToast(contest.resultsPublic ? '👁️ Results are now public' : '🔒 Results are now private', 'success');
                 render();
             } catch (error) {
                 console.error('Results public toggle error:', error);
@@ -3079,12 +2959,9 @@
                 }
             }
 
-            // Load merged results and display
-            await loadMergedResults(merger.contestIds);
-            state.view = 'mergedResults';
-            state.resultsView = 'average';
-            state.showMyVotes = false;
-            render();
+            // Load merged results
+            state.selectedContestsForMerge = merger.contestIds;
+            await viewSelectedMerge();
         }
 
         async function startMergerVoting(mergerId) {
@@ -3232,54 +3109,7 @@
             } else {
                 state.extractSelectedImages.push(imageId);
             }
-
-            // Update the count display and button state without full re-render to prevent blink
-            const countDisplay = document.querySelector('[data-extract-count]');
-            if (countDisplay) {
-                countDisplay.textContent = `From: ${state.extractSourceType === 'contest' ? state.contests.find(c => c.id === state.extractSourceId)?.title : state.extractSourceType === 'merger' ? state.mergers.find(m => m.id === state.extractSourceId)?.name : state.extracts.find(e => e.id === state.extractSourceId)?.name} (${state.extractSelectedImages.length} selected)`;
-            }
-
-            // Update save button state
-            const saveButton = document.querySelector('[data-extract-save]');
-            if (saveButton) {
-                const canSave = state.extractSelectedImages.length > 0 && state.newExtractName;
-                saveButton.disabled = !canSave;
-                if (canSave) {
-                    saveButton.className = 'flex-1 px-5 py-3 rounded-lg font-semibold transition text-sm bg-gradient-to-r from-yellow-500 to-yellow-600 text-white hover:from-yellow-600 hover:to-yellow-700';
-                } else {
-                    saveButton.className = 'flex-1 px-5 py-3 rounded-lg font-semibold transition text-sm bg-gray-300 text-gray-500 cursor-not-allowed';
-                }
-            }
-
-            // Update the specific checkbox visual
-            const imageElement = event?.target?.closest('[data-image-id]');
-            if (imageElement) {
-                const isSelected = state.extractSelectedImages.includes(imageId);
-                const borderDiv = imageElement.querySelector('.relative.cursor-pointer');
-                const checkboxDiv = imageElement.querySelector('.absolute.top-2');
-
-                if (borderDiv) {
-                    if (isSelected) {
-                        borderDiv.className = 'relative cursor-pointer rounded-lg overflow-hidden border-2 border-yellow-500 ring-2 ring-yellow-300';
-                    } else {
-                        borderDiv.className = 'relative cursor-pointer rounded-lg overflow-hidden border-2 border-transparent hover:border-yellow-400';
-                    }
-                }
-
-                if (checkboxDiv) {
-                    if (isSelected) {
-                        checkboxDiv.innerHTML = `
-                            <svg class="w-5 h-5 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
-                            </svg>
-                        `;
-                        checkboxDiv.className = 'absolute top-2 left-2 bg-white rounded-full w-8 h-8 flex items-center justify-center shadow-lg border-2 border-yellow-500';
-                    } else {
-                        checkboxDiv.innerHTML = '<div class="w-4 h-4 border-2 border-gray-400 rounded"></div>';
-                        checkboxDiv.className = 'absolute top-2 left-2 bg-white rounded-full w-8 h-8 flex items-center justify-center shadow-lg border-2 border-gray-300';
-                    }
-                }
-            }
+            render();
         }
 
         function setExtractName(name) {
@@ -4020,10 +3850,9 @@
                 // Update local state
                 state.appSettings[settingName] = newValue;
 
-                // Format setting name properly
-                const formattedName = settingName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
                 showToast(
-                    `✅ ${formattedName} ${newValue ? 'enabled' : 'disabled'}`
+                    `${settingName.replace(/_/g, ' ')} ${newValue ? 'enabled' : 'disabled'}`,
+                    'success'
                 );
                 render();
             } catch (error) {
@@ -4034,70 +3863,12 @@
 
         // ==================== FOLDER MANAGEMENT ====================
 
-        function initializeFolderSortable() {
-            const foldersList = document.getElementById('folders-list');
-            if (!foldersList || typeof Sortable === 'undefined') return;
-
-            // Initialize folder reordering
-            new Sortable(foldersList, {
-                animation: 150,
-                handle: '.cursor-move',
-                ghostClass: 'bg-blue-100',
-                onEnd: async (evt) => {
-                    // Reorder the state.groups array
-                    const movedFolder = state.groups.splice(evt.oldIndex, 1)[0];
-                    state.groups.splice(evt.newIndex, 0, movedFolder);
-
-                    // Update display_order for all folders
-                    for (let i = 0; i < state.groups.length; i++) {
-                        await saveFolderOrder(state.groups[i].id, i);
-                    }
-
-                    await loadGroups();
-                    render();
-                    setTimeout(initializeFolderSortable, 100);
-                }
-            });
-
-            // Initialize item reordering within each folder
-            state.groups.forEach(group => {
-                const itemsList = document.getElementById(`folder-items-${group.id}`);
-                if (itemsList) {
-                    new Sortable(itemsList, {
-                        animation: 150,
-                        handle: '.cursor-move',
-                        ghostClass: 'bg-blue-100',
-                        onEnd: async (evt) => {
-                            const folderId = itemsList.dataset.folderId;
-                            const folder = state.groups.find(g => g.id === folderId);
-                            if (!folder) return;
-
-                            // Reorder the items array
-                            const movedItem = folder.items.splice(evt.oldIndex, 1)[0];
-                            folder.items.splice(evt.newIndex, 0, movedItem);
-
-                            // Update display_order for all items in this folder
-                            for (let i = 0; i < folder.items.length; i++) {
-                                await saveItemOrder(folderId, folder.items[i].item_id, folder.items[i].item_type, i);
-                            }
-
-                            await loadGroups();
-                            render();
-                            setTimeout(initializeFolderSortable, 100);
-                        }
-                    });
-                }
-            });
-        }
-
         async function openManageFoldersModal() {
             state.showManageFoldersModal = true;
             state.showUserDropdown = false;
             document.body.classList.add('modal-open');
             await loadGroups();
             render();
-            // Initialize SortableJS after render
-            setTimeout(initializeFolderSortable, 100);
         }
 
         function closeManageFoldersModal() {
@@ -4106,53 +3877,10 @@
             render();
         }
 
-        function showCreateFolderModal() {
-            state.modal = {
-                icon: '📁',
-                title: 'Create New Folder',
-                type: 'input',
-                placeholder: 'Enter folder name...',
-                inputValue: '',
-                buttons: [
-                    {
-                        text: 'Cancel',
-                        primary: false,
-                        action: 'cancelCreateFolder'
-                    },
-                    {
-                        text: 'Create',
-                        primary: true,
-                        action: 'confirmCreateFolder'
-                    }
-                ]
-            };
-            document.body.classList.add('modal-open');
-            render();
-            // Focus the input after render
-            setTimeout(() => {
-                const input = document.getElementById('modal-input');
-                if (input) input.focus();
-            }, 100);
-        }
+        async function createFolder() {
+            const folderName = prompt('Enter folder name:');
+            if (!folderName || !folderName.trim()) return;
 
-        function cancelCreateFolder() {
-            state.modal = null;
-            document.body.classList.remove('modal-open');
-            render();
-        }
-
-        async function confirmCreateFolder() {
-            const folderName = document.getElementById('modal-input')?.value;
-            if (!folderName || !folderName.trim()) {
-                showToast('❌ Please enter a folder name');
-                return;
-            }
-            state.modal = null;
-            document.body.classList.remove('modal-open');
-            await createFolder(folderName.trim());
-        }
-
-        async function createFolder(folderName) {
             try {
                 setLoading('Creating folder...');
                 const maxOrder = state.groups.length > 0 ? Math.max(...state.groups.map(g => g.display_order || 0)) : 0;
@@ -4166,7 +3894,7 @@
                         'Prefer': 'return=representation'
                     },
                     body: JSON.stringify({
-                        name: folderName,
+                        name: folderName.trim(),
                         display_order: maxOrder + 1
                     })
                 });
@@ -4176,12 +3904,12 @@
                 }
 
                 await loadGroups();
-                showToast('✅ Folder created successfully');
+                showToast('Folder created successfully', 'success');
                 clearLoading();
                 render();
             } catch (error) {
                 console.error('Error creating folder:', error);
-                showToast('❌ Failed to create folder: ' + error.message);
+                showToast('Failed to create folder: ' + error.message, 'error');
                 clearLoading();
             }
         }
@@ -4345,28 +4073,6 @@
             }
         }
 
-        async function saveItemOrder(groupId, itemId, itemType, newOrder) {
-            try {
-                const response = await fetch(`${SUPABASE_URL}/rest/v1/contest_groups?group_id=eq.${groupId}&item_id=eq.${itemId}&item_type=eq.${itemType}`, {
-                    method: 'PATCH',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'apikey': SUPABASE_ANON_KEY,
-                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-                    },
-                    body: JSON.stringify({
-                        display_order: newOrder
-                    })
-                });
-
-                if (!response.ok) {
-                    throw new Error('Failed to update item order');
-                }
-            } catch (error) {
-                console.error('Error saving item order:', error);
-            }
-        }
-
         function toggleFolderExpanded(folderId) {
             const index = state.expandedFolderIds.indexOf(folderId);
             if (index > -1) {
@@ -4385,16 +4091,8 @@
         }
 
         async function viewUserProfile(userId) {
+            state.view = 'userProfile';
             state.viewingUserId = userId;
-            state.showUserProfileModal = true;
-            document.body.classList.add('modal-open');
-            render();
-        }
-
-        function closeUserProfileModal() {
-            state.showUserProfileModal = false;
-            state.viewingUserId = null;
-            document.body.classList.remove('modal-open');
             render();
         }
 
@@ -4569,7 +4267,7 @@
                             <div class="text-5xl mb-2">${state.modal.icon}</div>
                             ${isInput ? `
                                 <h3 class="text-xl font-bold text-gray-800 mb-2">${state.modal.title}</h3>
-                                <input id="modal-input" type="text" value="${state.modal.inputValue || ''}" class="modal-input w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-mauve-400 focus:outline-none" placeholder="${state.modal.placeholder}" />
+                                <input type="text" class="modal-input w-full px-4 py-2 border-2 border-gray-300 rounded-lg focus:border-mauve-400 focus:outline-none" placeholder="${state.modal.placeholder}" />
                             ` : `
                                 <p class="text-base font-bold text-gray-800 whitespace-pre-line">${state.modal.message}</p>
                             `}
@@ -4608,6 +4306,86 @@
                                     </button>
                                 `;
                             }).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderMergeModal() {
+            if (!state.showMergeModal) return '';
+
+            const selectedCount = state.selectedContestsForMerge.length;
+            const currentContestId = state.currentContest?.id;
+
+            return `
+                <div class="fixed inset-0 modal-overlay flex items-center justify-center z-[60] p-4" onclick="event.target === this && closeMergeModal()">
+                    <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col modal-content" onclick="event.stopPropagation()">
+                        <!-- Header -->
+                        <div class="p-6 border-b border-gray-200">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <h3 class="text-xl font-bold text-gray-800">Merge Contests</h3>
+                                    <p class="text-sm text-gray-600 mt-1">
+                                        Select contests to merge (${selectedCount} selected, min 2 required)
+                                    </p>
+                                </div>
+                                <button onclick="closeMergeModal()" class="text-gray-500 hover:text-gray-700">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Contest List -->
+                        <div class="flex-1 overflow-y-auto p-6 space-y-2">
+                            ${state.contests.map(contest => {
+                                const isCurrentContest = contest.id === currentContestId;
+                                const isSelected = state.selectedContestsForMerge.includes(contest.id);
+                                const isDisabled = isCurrentContest;
+
+                                return `
+                                    <div class="border ${isSelected ? 'border-blue-400 bg-blue-50' : 'border-gray-200'} rounded-lg p-3 flex items-center gap-3 ${isDisabled ? 'opacity-75' : 'cursor-pointer hover:border-blue-300'}"
+                                         ${!isDisabled ? `onclick="toggleContestSelection('${contest.id}')"` : ''}>
+                                        <input
+                                            type="checkbox"
+                                            ${isSelected ? 'checked' : ''}
+                                            ${isDisabled ? 'disabled' : ''}
+                                            class="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 ${isDisabled ? 'cursor-not-allowed' : 'cursor-pointer'}"
+                                            onclick="event.stopPropagation()"
+                                            onchange="toggleContestSelection('${contest.id}')"
+                                        />
+                                        <img src="${contest.creatorAvatar}" alt="${contest.creatorName}" class="w-8 h-8 rounded-full flex-shrink-0" />
+                                        <div class="flex-1 min-w-0">
+                                            <div class="flex items-center gap-2">
+                                                <h4 class="font-semibold text-gray-800 truncate">${contest.title}</h4>
+                                                ${isCurrentContest ? '<span class="text-xs bg-blue-500 text-white px-2 py-0.5 rounded">Current</span>' : ''}
+                                            </div>
+                                            <p class="text-xs text-gray-500">
+                                                ${contest.creatorName} • ${contest.imageCount || 0} images • ${contest.voterCount || 0} voters
+                                            </p>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+
+                        <!-- Footer -->
+                        <div class="p-6 border-t border-gray-200 flex gap-3">
+                            <button
+                                onclick="closeMergeModal()"
+                                class="flex-1 px-5 py-3 rounded-lg font-semibold transition text-sm bg-gray-200 text-gray-700 hover:bg-gray-300"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onclick="viewSelectedMerge()"
+                                class="flex-1 px-5 py-3 rounded-lg font-semibold transition text-sm ${selectedCount >= 2 ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}"
+                                ${selectedCount < 2 ? 'disabled' : ''}
+                            >
+                                Merge & View Results
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -4763,7 +4541,7 @@
                             <div class="flex items-center justify-between">
                                 <div>
                                     <h3 class="text-xl font-bold text-gray-800">Create Extract - Select Images</h3>
-                                    <p class="text-sm text-gray-600 mt-1" data-extract-count>
+                                    <p class="text-sm text-gray-600 mt-1">
                                         From: ${sourceName} (${selectedCount} selected)
                                     </p>
                                 </div>
@@ -4781,11 +4559,10 @@
                                 ${sourceImages.map(image => {
                                     const isSelected = (state.extractSelectedImages || []).includes(image.id);
                                     return `
-                                        <div data-image-id="${image.id}">
-                                            <div
-                                                class="relative cursor-pointer rounded-lg overflow-hidden border-2 ${isSelected ? 'border-yellow-500 ring-2 ring-2 ring-yellow-300' : 'border-transparent hover:border-yellow-400'}"
-                                                onclick="toggleExtractImage('${image.id}')"
-                                            >
+                                        <div
+                                            class="relative cursor-pointer rounded-lg overflow-hidden border-2 ${isSelected ? 'border-yellow-500 ring-2 ring-yellow-300' : 'border-transparent hover:border-yellow-400'}"
+                                            onclick="toggleExtractImage('${image.id}')"
+                                        >
                                             <img src="${image.url}" alt="${image.label || ''}" class="w-full h-32 object-cover" />
                                             ${image.label ? `
                                                 <div class="absolute bottom-0 left-0 right-0 bg-black bg-opacity-70 text-white text-xs p-1 truncate">
@@ -4800,7 +4577,6 @@
                                                 ` : `
                                                     <div class="w-4 h-4 border-2 border-gray-400 rounded"></div>
                                                 `}
-                                            </div>
                                             </div>
                                         </div>
                                     `;
@@ -4830,7 +4606,6 @@
                                     Cancel
                                 </button>
                                 <button
-                                    data-extract-save
                                     onclick="saveExtract()"
                                     class="flex-1 px-5 py-3 rounded-lg font-semibold transition text-sm ${selectedCount > 0 && state.newExtractName ? 'bg-gradient-to-r from-yellow-500 to-yellow-600 text-white hover:from-yellow-600 hover:to-yellow-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}"
                                     ${selectedCount === 0 || !state.newExtractName ? 'disabled' : ''}
@@ -5066,132 +4841,6 @@
             `;
         }
 
-        function renderCompressionModal() {
-            if (!state.compressionProgress) return '';
-
-            const isAdmin = state.user && state.user.id === ADMIN_DISCORD_ID;
-            const allCompleted = state.compressionProgress.allComplete;
-            const completeCount = state.compressionProgress.files.filter(f => f.status === 'complete').length;
-            const failedCount = state.compressionProgress.files.filter(f => f.status === 'failed' && !f.adminBypass).length;
-            const compressingCount = state.compressionProgress.files.filter(f => f.status === 'compressing').length;
-
-            return `
-                <div class="fixed inset-0 modal-overlay flex items-center justify-center z-[60] p-4">
-                    <div class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[85vh] flex flex-col modal-content" onclick="event.stopPropagation()">
-                        <!-- Header -->
-                        <div class="p-6 border-b border-gray-200">
-                            <div class="flex items-center justify-between">
-                                <div>
-                                    <h3 class="text-xl font-bold text-gray-800">
-                                        ${allCompleted ? 'Compression Complete' : 'Compressing Images...'}
-                                    </h3>
-                                    <p class="text-sm text-gray-600 mt-1">
-                                        ${completeCount} completed, ${failedCount} failed, ${compressingCount} in progress
-                                    </p>
-                                </div>
-                                <div class="text-3xl">
-                                    ${allCompleted ? (failedCount > 0 ? '⚠️' : '✅') : '🔄'}
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- File List -->
-                        <div class="flex-1 overflow-y-auto p-6 space-y-4">
-                            ${state.compressionProgress.files.map((fileState, index) => {
-                                const isOversized = fileState.status === 'failed' && fileState.compressedSize > 500 * 1024;
-                                const bgColor = fileState.status === 'complete' || fileState.adminBypass ? 'bg-green-50 border-green-200' :
-                                                fileState.status === 'failed' ? 'bg-red-50 border-red-200' :
-                                                'bg-blue-50 border-blue-200';
-
-                                return `
-                                    <div class="border border-gray-200 rounded-lg p-4 ${bgColor}">
-                                        <div class="flex items-start justify-between mb-2">
-                                            <div class="flex-1 min-w-0">
-                                                <p class="font-medium text-gray-800 truncate" title="${fileState.name}">
-                                                    ${fileState.name}
-                                                </p>
-                                                <div class="flex flex-wrap gap-3 mt-2 text-xs text-gray-600">
-                                                    <span><strong>Original:</strong> ${formatFileSize(fileState.originalSize)}</span>
-                                                    ${fileState.compressedSize ? `
-                                                        <span><strong>Compressed:</strong> ${formatFileSize(fileState.compressedSize)}</span>
-                                                    ` : ''}
-                                                    ${fileState.savingsPercent > 0 ? `
-                                                        <span class="text-green-600 font-semibold">Saved ${fileState.savingsPercent}%</span>
-                                                    ` : ''}
-                                                </div>
-                                                ${fileState.status === 'compressing' ? `
-                                                    <p class="text-xs text-blue-600 mt-1">🔄 Compressing...</p>
-                                                ` : ''}
-                                                ${fileState.status === 'complete' ? `
-                                                    <p class="text-xs text-green-600 mt-1">✅ Complete</p>
-                                                ` : ''}
-                                                ${fileState.status === 'failed' && !fileState.adminBypass ? `
-                                                    <p class="text-xs text-red-600 mt-1">❌ ${fileState.error}</p>
-                                                ` : ''}
-                                                ${fileState.adminBypass ? `
-                                                    <p class="text-xs text-orange-600 mt-1 font-semibold">⚠️ Admin override: Adding image exceeding 500 KB limit</p>
-                                                ` : ''}
-                                            </div>
-                                            <div class="ml-3 text-2xl flex-shrink-0">
-                                                ${fileState.status === 'complete' || fileState.adminBypass ? '✅' :
-                                                  fileState.status === 'failed' ? '❌' :
-                                                  '🔄'}
-                                            </div>
-                                        </div>
-
-                                        <!-- Progress Bar -->
-                                        ${fileState.status === 'compressing' ? `
-                                            <div class="w-full bg-gray-200 rounded-full h-2 mb-2">
-                                                <div class="bg-blue-500 h-2 rounded-full transition-all duration-300"
-                                                     style="width: ${fileState.progress || 0}%"></div>
-                                            </div>
-                                            <p class="text-xs text-gray-600">${fileState.progress || 0}%</p>
-                                        ` : ''}
-
-                                        <!-- Action Buttons -->
-                                        <div class="flex gap-2 mt-3">
-                                            ${fileState.status === 'complete' && fileState.canCompressMore ? `
-                                                <button onclick="compressMoreImage(${index})"
-                                                        class="px-3 py-1.5 text-xs bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition font-medium">
-                                                    🔽 Compress More
-                                                </button>
-                                            ` : ''}
-                                            ${fileState.status === 'failed' && isAdmin && isOversized && !fileState.adminBypass ? `
-                                                <button onclick="addOversizedImageAnyway(${index})"
-                                                        class="px-3 py-1.5 text-xs bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition font-medium">
-                                                    ⚠️ Add Anyway
-                                                </button>
-                                            ` : ''}
-                                            ${(fileState.status === 'complete' || fileState.status === 'failed') && !fileState.adminBypass ? `
-                                                <button onclick="cancelCompressionImage(${index})"
-                                                        class="px-3 py-1.5 text-xs bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition font-medium">
-                                                    ✖ Cancel Image
-                                                </button>
-                                            ` : ''}
-                                        </div>
-                                    </div>
-                                `;
-                            }).join('')}
-                        </div>
-
-                        <!-- Footer -->
-                        <div class="p-6 border-t border-gray-200">
-                            ${allCompleted ? `
-                                <button onclick="closeCompressionModal()"
-                                        class="w-full px-5 py-3 rounded-lg font-semibold transition text-sm bg-gradient-to-r from-green-500 to-green-700 text-white hover:from-green-600 hover:to-green-800">
-                                    Done (${completeCount + (isAdmin ? state.compressionProgress.files.filter(f => f.adminBypass).length : 0)} images will be added)
-                                </button>
-                            ` : `
-                                <p class="text-sm text-gray-600 text-center">
-                                    Please wait for compression to complete...
-                                </p>
-                            `}
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-
         function renderLoadingOverlay() {
             if (!state.isLoading) return '';
             return `<div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100]">
@@ -5210,10 +4859,10 @@
                 <header class="safe-header bg-gradient-to-r from-mauve-600 via-mauve-300 to-green-700 text-white shadow-lg">
                     <div class="max-w-7xl mx-auto px-3 py-2 sm:py-3 flex justify-between items-center gap-2">
                         <div class="flex items-center gap-2">
-                            <div onclick="backToHome()" class="w-8 h-8 rounded-full flex items-center justify-center bg-gradient-to-br from-mauve-300 to-mauve-500 cursor-pointer hover:opacity-80 transition">
+                            <div class="w-8 h-8 rounded-full flex items-center justify-center bg-gradient-to-br from-mauve-300 to-mauve-500">
                                 <span class="text-xl">🌺</span>
                             </div>
-                            <h1 onclick="backToHome()" class="text-xl font-bold cursor-pointer hover:opacity-80 transition">Peony</h1>
+                            <h1 class="text-xl font-bold">Peony</h1>
                             ${showBackButton ? `
                                 <button onclick="backToHome()" class="ml-2 bg-white/20 hover:bg-white/30 text-white px-3 py-1.5 sm:py-1 rounded-lg font-semibold transition text-sm flex items-center gap-1 min-h-[36px] sm:min-h-0">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -5323,7 +4972,7 @@
 
         function clearAllFilters() {
             state.filters.createdBy = null;
-            state.filters.sortBy = 'withFolders';
+            state.filters.sortBy = 'newest';
             state.filters.searchQuery = '';
             // Clear URL parameter
             const url = new URL(window.location);
@@ -5402,9 +5051,9 @@
 
                                 if (!contestCreationEnabled && !isAdmin) {
                                     return `
-                                        <button onclick="showContestCreationDisabledModal()" class="bg-gray-400 text-gray-200 px-4 py-2 rounded-lg font-semibold cursor-not-allowed opacity-50 text-sm">
-                                            + Create Contest
-                                        </button>
+                                        <div class="bg-yellow-100 border border-yellow-400 text-yellow-800 px-4 py-2 rounded-lg text-sm">
+                                            ℹ️ Contest creation is currently disabled
+                                        </div>
                                     `;
                                 }
 
@@ -5449,7 +5098,6 @@
                         <div class="flex-1 min-w-[200px]">
                             <label class="text-xs font-medium text-gray-700 mb-1 block">Sort By</label>
                             <select onchange="setSortBy(this.value)" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-mauve-400 focus:outline-none">
-                                <option value="withFolders" ${state.filters.sortBy === 'withFolders' ? 'selected' : ''}>With Folders</option>
                                 <option value="newest" ${state.filters.sortBy === 'newest' || state.filters.sortBy === 'dateDesc' ? 'selected' : ''}>Newest First</option>
                                 <option value="oldest" ${state.filters.sortBy === 'oldest' || state.filters.sortBy === 'dateAsc' ? 'selected' : ''}>Oldest First</option>
                                 <option value="titleAsc" ${state.filters.sortBy === 'titleAsc' ? 'selected' : ''}>A-Z</option>
@@ -5469,7 +5117,7 @@
                                 `).join('')}
                             </select>
                         </div>
-                        ${state.filters.createdBy || state.filters.sortBy !== 'withFolders' || state.filters.searchQuery ? `
+                        ${state.filters.createdBy || state.filters.sortBy !== 'newest' || state.filters.searchQuery ? `
                             <div class="flex items-end">
                                 <button onclick="clearAllFilters()" class="bg-red-500 text-white px-4 py-2 rounded-lg font-semibold hover:bg-red-600 transition text-sm">
                                     Clear All Filters
@@ -5508,8 +5156,8 @@
                         // Sort by creation date (newest first by default)
                         allItems.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
-                        // Check if we should show folders (only when sort is withFolders and no filters)
-                        const showFolders = state.filters.sortBy === 'withFolders' && !state.filters.createdBy && !state.filters.searchQuery;
+                        // Check if we should show folders (only when sort is newest and no filters)
+                        const showFolders = state.filters.sortBy === 'newest' && !state.filters.createdBy && !state.filters.searchQuery;
 
                         if (showFolders && state.groups.length > 0) {
                             // Get items that are in folders
@@ -5545,7 +5193,7 @@
 
                                     return `
                                         <div class="bg-white rounded-xl shadow-lg overflow-hidden mb-4 fade-in">
-                                            <div class="bg-gradient-to-r from-mauve-400 to-mauve-600 p-4 cursor-pointer hover:from-mauve-500 hover:to-mauve-700 transition" onclick="toggleFolderExpanded('${group.id}')">
+                                            <div class="bg-gradient-to-r from-mauve-400 to-mauve-600 p-4 cursor-pointer hover:from-mauve-500 hover:to-mauve-700 transition" onclick="toggleFolderExpanded(${group.id})">
                                                 <div class="flex items-center gap-3 text-white">
                                                     <svg class="w-5 h-5 transition-transform ${isExpanded ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -5611,12 +5259,10 @@
             `;
         }
 
-        function renderUserProfileModal() {
-            if (!state.showUserProfileModal) return '';
-
+        function renderUserProfile() {
             const userId = state.viewingUserId;
             if (!userId) {
-                return '';
+                return '<div class="text-center p-8">User not found</div>';
             }
 
             // Find user info from allUsers or from contest data
@@ -5688,62 +5334,48 @@
             const isCurrentUser = state.user && state.user.id === userId;
 
             return `
-                <div class="fixed inset-0 modal-overlay flex items-center justify-center z-[60] p-4" onclick="event.target === this && closeUserProfileModal()">
-                    <div class="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden modal-content flex flex-col" onclick="event.stopPropagation()">
-                        <!-- Header -->
-                        <div class="p-6 border-b border-gray-200 flex-shrink-0">
-                            <div class="flex items-center justify-between mb-4">
-                                <h3 class="text-2xl font-bold text-gray-800">User Profile</h3>
-                                <button onclick="closeUserProfileModal()" class="text-gray-500 hover:text-gray-700">
-                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                                    </svg>
-                                </button>
-                            </div>
-                            <div class="flex items-center gap-4">
-                                <img src="${userInfo.avatar}" alt="${userInfo.username}" class="w-20 h-20 rounded-full" />
-                                <div class="flex-1">
-                                    <h2 class="text-2xl font-bold text-gray-800">${userInfo.username}</h2>
-                                    <p class="text-gray-600">${isCurrentUser ? '(You)' : ''} ${isBanned ? '🚫 BANNED' : ''}</p>
-                                    <p class="text-sm text-gray-500 mt-1">Voted in ${allVotedItems.length} ${allVotedItems.length === 1 ? 'item' : 'items'}</p>
-                                </div>
-                            </div>
-                        </div>
+                <div class="max-w-7xl mx-auto px-3 py-4">
+                    <button onclick="state.view = 'home'; render();" class="mb-4 bg-gray-500 text-white px-4 py-2 rounded-lg font-semibold hover:bg-gray-600 transition">
+                        ← Back to Home
+                    </button>
 
-                        <!-- Scrollable content -->
-                        <div class="flex-1 overflow-y-auto p-6">
-                            <div class="mb-4">
-                                <h3 class="text-lg font-bold text-gray-800">Voting History</h3>
+                    <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                        <div class="flex items-center gap-4 mb-4">
+                            <img src="${userInfo.avatar}" alt="${userInfo.username}" class="w-24 h-24 rounded-full" />
+                            <div class="flex-1">
+                                <h2 class="text-3xl font-bold text-gray-800">${userInfo.username}</h2>
+                                <p class="text-gray-600">${isCurrentUser ? '(You)' : ''} ${isBanned ? '🚫 BANNED' : ''}</p>
+                                <p class="text-sm text-gray-500 mt-2">Voted in ${allVotedItems.length} ${allVotedItems.length === 1 ? 'item' : 'items'}</p>
                             </div>
-
-                            ${allVotedItems.length === 0 ? `
-                                <div class="bg-gray-50 rounded-lg p-8 text-center">
-                                    <p class="text-gray-500">No voting history yet</p>
-                                </div>
-                            ` : `
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                    ${allVotedItems.map(item => {
-                                        if (item.itemType === 'merger') {
-                                            return renderMergerCard(item);
-                                        } else if (item.itemType === 'extract') {
-                                            return renderExtractCard(item);
-                                        } else {
-                                            return renderContestCard(item);
-                                        }
-                                    }).join('')}
-                                </div>
-                            `}
-                        </div>
-
-                        <!-- Footer with ban button -->
-                        ${isAdmin && !isCurrentUser && !isBanned ? `
-                            <div class="p-4 border-t border-gray-200 flex-shrink-0">
-                                <button onclick="confirmBanUser('${userId}', '${userInfo.username}')" class="w-full bg-red-500 text-white px-4 py-2 rounded-lg font-semibold hover:bg-red-600 transition">
+                            ${isAdmin && !isCurrentUser && !isBanned ? `
+                                <button onclick="confirmBanUser('${userId}', '${userInfo.username}')" class="bg-red-500 text-white px-4 py-2 rounded-lg font-semibold hover:bg-red-600 transition">
                                     🚫 Ban User
                                 </button>
-                            </div>
-                        ` : ''}
+                            ` : ''}
+                        </div>
                     </div>
+
+                    <div class="mb-4">
+                        <h3 class="text-2xl font-bold text-gray-800">Voting History</h3>
+                    </div>
+
+                    ${allVotedItems.length === 0 ? `
+                        <div class="bg-white rounded-xl shadow-lg p-8 text-center">
+                            <p class="text-gray-500">No voting history yet</p>
+                        </div>
+                    ` : `
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                            ${allVotedItems.map(item => {
+                                if (item.itemType === 'merger') {
+                                    return renderMergerCard(item);
+                                } else if (item.itemType === 'extract') {
+                                    return renderExtractCard(item);
+                                } else {
+                                    return renderContestCard(item);
+                                }
+                            }).join('')}
+                        </div>
+                    `}
                 </div>
             `;
         }
@@ -5754,14 +5386,19 @@
                                 const voterCount = contest.voterCount || 0;
                             const canDelete = canDeleteContest(contest);
                             const isBanned = state.bannedUsers.includes(state.user.id);
-                            const createdDate = formatDate(contest.createdAt);
+                            // Format date as "day month year" (e.g., "30 Nov 2025")
+                            const createdDate = contest.createdAt ? (() => {
+                                const date = new Date(contest.createdAt);
+                                const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                                return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
+                            })() : '';
 
                             return `
                                 <div class="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition fade-in p-4 relative">
                                     ${(contest.createdBy === state.user.id || state.user.id === ADMIN_DISCORD_ID) ? `
                                         <button
                                             onclick='toggleResultsPublic("${contest.id}")'
-                                            class="absolute top-3 right-14 p-1.5 rounded-full shadow-lg transition-all hover:scale-110 ${contest.resultsPublic !== false ? 'bg-green-500 hover:bg-green-600' : 'bg-black hover:bg-gray-900'}"
+                                            class="absolute top-3 right-14 p-1.5 rounded-full shadow-lg transition-all hover:scale-110 ${contest.resultsPublic !== false ? 'bg-blue-500 hover:bg-blue-600' : 'bg-gray-500 hover:bg-gray-600'}"
                                             title="${contest.resultsPublic !== false ? 'Results are public - Click to make private' : 'Results are private - Click to make public'}"
                                         >
                                             ${contest.resultsPublic !== false ? `
@@ -5813,7 +5450,7 @@
                                     <div class="flex gap-2">
                                         ${contest.isLocked ? `
                                             <button
-                                                onclick='viewLockedResults(${safeStringify(contest)})'
+                                                onclick='viewLockedResults(${JSON.stringify(contest).replace(/'/g, "&apos;")})'
                                                 class="flex-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white py-2 rounded-lg font-semibold hover:from-blue-600 hover:to-blue-700 transition shadow-md text-sm"
                                             >
                                                 View Results
@@ -5821,14 +5458,14 @@
                                         ` : (hasVoted || contest.createdBy === state.user.id) && (contest.voterCount > 0) ? `
                                             ${contest.createdBy === state.user.id && !hasVoted ? `
                                                 <button
-                                                    onclick='startVoting(${safeStringify(contest)})'
+                                                    onclick='startVoting(${JSON.stringify(contest).replace(/'/g, "&apos;")})'
                                                     class="flex-1 bg-gradient-to-r from-mauve-400 to-mauve-600 text-white py-2 rounded-lg font-semibold hover:from-mauve-500 hover:to-mauve-700 transition shadow-md text-sm"
                                                 >
                                                     Start Voting
                                                 </button>
                                             ` : ''}
                                             <button
-                                                onclick='viewResults(${safeStringify(contest)})'
+                                                onclick='viewResults(${JSON.stringify(contest).replace(/'/g, "&apos;")})'
                                                 class="flex-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white py-2 rounded-lg font-semibold hover:from-blue-600 hover:to-blue-700 transition shadow-md text-sm"
                                             >
                                                 View Results
@@ -5839,7 +5476,7 @@
                                             </div>
                                         ` : `
                                             <button
-                                                onclick='startVoting(${safeStringify(contest)})'
+                                                onclick='startVoting(${JSON.stringify(contest).replace(/'/g, "&apos;")})'
                                                 class="flex-1 bg-gradient-to-r from-mauve-400 to-mauve-600 text-white py-2 rounded-lg font-semibold hover:from-mauve-500 hover:to-mauve-700 transition shadow-md text-sm"
                                             >
                                                 Start Voting
@@ -5887,7 +5524,11 @@
             const hasVotedNone = votedContests.length === 0;
 
             const isBanned = state.bannedUsers.includes(state.user.id);
-            const createdDate = formatDate(merger.createdAt);
+            const createdDate = merger.createdAt ? (() => {
+                const date = new Date(merger.createdAt);
+                const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
+            })() : '';
 
             return `
                 <div class="bg-blue-50 border-2 border-blue-300 rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition fade-in p-4 relative">
@@ -5983,7 +5624,11 @@
 
             const imageCount = extract.imageIds.length;
             const isBanned = state.bannedUsers.includes(state.user.id);
-            const createdDate = formatDate(extract.createdAt);
+            const createdDate = extract.createdAt ? (() => {
+                const date = new Date(extract.createdAt);
+                const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
+            })() : '';
 
             return `
                 <div class="bg-yellow-50 border-2 border-yellow-400 rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition fade-in p-4 relative">
@@ -6068,7 +5713,7 @@
                                 📁 <strong>Or:</strong> Click "Upload Image Files" or drag & drop files (max 10MB each, multiple files supported)
                             </p>
                             <p class="text-xs text-green-800 font-semibold">
-                                ⚡ Uploaded files are automatically compressed to 500 KB max to optimize loading speed
+                                ⚡ Uploaded files are automatically compressed to optimize loading speed
                             </p>
                         </div>
 
@@ -6135,11 +5780,6 @@
                                     <button onclick="removeContestImage(${index})" class="absolute top-1 right-1 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition shadow-lg">
                                         ×
                                     </button>
-                                    ${img.compressedSize ? `
-                                        <div class="text-xs text-center text-gray-600 mt-1 font-medium">
-                                            ${formatFileSize(img.compressedSize)}
-                                        </div>
-                                    ` : ''}
                                     ${state.newContest.labelsEnabled ? `
                                         <input
                                             type="text"
@@ -6359,7 +5999,7 @@
 
             return `
                 <div class="max-w-7xl mx-auto px-3 py-4">
-                    <div class="bg-white rounded-xl shadow-xl p-4 fade-in">
+                    <div class="bg-white rounded-xl shadow-xl p-4 pb-8 fade-in min-h-screen">
                         <div class="text-center mb-4">
                             <div class="flex items-center justify-center gap-2 mb-2">
                                 <span class="text-4xl">🎆</span>
@@ -6371,24 +6011,6 @@
                                 'Total votes from all participants'
                             }</p>
                             <p class="text-xs text-gray-500">Click on any image to see the vote breakdown</p>
-
-                            ${(() => {
-                                const isAdmin = state.user && state.user.id === ADMIN_DISCORD_ID;
-                                const isCreator = state.user && state.user.id === state.currentContest.createdBy;
-                                const isPrivate = state.currentContest.resultsPublic === false;
-
-                                if (isPrivate && isAdmin && !isCreator) {
-                                    return `
-                                        <div class="mt-3 mb-2 max-w-2xl mx-auto">
-                                            <div class="bg-yellow-50 border border-yellow-400 text-yellow-800 px-4 py-3 rounded-lg text-sm flex items-start gap-2">
-                                                <span class="text-lg flex-shrink-0">⚠️</span>
-                                                <p class="flex-1">These results are private. Only you and the contest creator can view them.</p>
-                                            </div>
-                                        </div>
-                                    `;
-                                }
-                                return '';
-                            })()}
 
                             <div class="mt-3 flex flex-col items-center justify-center gap-2">
                                 <!-- First row: View tabs -->
@@ -6412,32 +6034,25 @@
                                         Average
                                     </button>
                                 </div>
-                                <!-- Second row: Action buttons (only show if user has voted and contest is not locked) -->
-                                ${state.userVotedContests[state.currentContest.id] && !state.currentContest.isLocked ? `
+                                <!-- Second row: Action buttons (only show if user has voted or contest is locked) -->
+                                ${state.userVotedContests[state.currentContest.id] || state.currentContest.isLocked ? `
                                     <div class="flex items-center justify-center gap-3">
-                                        ${(() => {
-                                            const revotingEnabled = state.appSettings.revoting_enabled !== false;
-                                            if (!revotingEnabled) {
-                                                return `
-                                                    <button
-                                                        onclick="showRevotingDisabledModal()"
-                                                        class="px-3 py-1 rounded-lg bg-gray-400 text-gray-200 opacity-50 cursor-not-allowed transition text-sm"
-                                                        title="Revoting is temporarily disabled"
-                                                    >
-                                                        🔄 Revote
-                                                    </button>
-                                                `;
-                                            }
-                                            return `
-                                                <button
-                                                    onclick="startRevote()"
-                                                    class="px-3 py-1 rounded-lg bg-purple-500 text-white hover:bg-purple-600 transition text-sm"
-                                                    title="Re-vote from scratch"
-                                                >
-                                                    🔄 Revote
-                                                </button>
-                                            `;
-                                        })()}
+                                        ${state.userVotedContests[state.currentContest.id] && !state.currentContest.isLocked ? `
+                                            <button
+                                                onclick="startRevote()"
+                                                class="px-3 py-1 rounded-lg bg-purple-500 text-white hover:bg-purple-600 transition text-sm"
+                                                title="Re-vote from scratch"
+                                            >
+                                                🔄 Revote
+                                            </button>
+                                        ` : ''}
+                                        <button
+                                            onclick="openMergeModal()"
+                                            class="px-3 py-1 rounded-lg bg-blue-500 text-white hover:bg-blue-600 transition text-sm"
+                                            title="Merge with other contests"
+                                        >
+                                            🔗 Merge with Other Contests
+                                        </button>
                                     </div>
                                 ` : ''}
                             </div>
@@ -6948,7 +6563,7 @@
 
                         <div class="p-6 overflow-y-auto flex-1">
                             <div class="mb-6">
-                                <button onclick="showCreateFolderModal()" class="bg-gradient-to-r from-green-500 to-green-700 text-white px-4 py-2 rounded-lg font-semibold hover:from-green-600 hover:to-green-800 transition shadow-lg">
+                                <button onclick="createFolder()" class="bg-gradient-to-r from-green-500 to-green-700 text-white px-4 py-2 rounded-lg font-semibold hover:from-green-600 hover:to-green-800 transition shadow-lg">
                                     + Create New Folder
                                 </button>
                             </div>
@@ -6970,15 +6585,15 @@
                                                     <h4 class="font-semibold text-gray-800">${group.name}</h4>
                                                     <p class="text-sm text-gray-600">${(group.items || []).length} items</p>
                                                 </div>
-                                                <button onclick="addItemToFolder('${group.id}')" class="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 text-sm">
+                                                <button onclick="addItemToFolder(${group.id})" class="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 text-sm">
                                                     + Add Item
                                                 </button>
-                                                <button onclick="deleteFolder('${group.id}')" class="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600 text-sm">
+                                                <button onclick="deleteFolder(${group.id})" class="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600 text-sm">
                                                     Delete
                                                 </button>
                                             </div>
                                             ${(group.items || []).length > 0 ? `
-                                                <div class="p-4 bg-white space-y-2" id="folder-items-${group.id}" data-folder-id="${group.id}">
+                                                <div class="p-4 bg-white space-y-2">
                                                     ${(group.items || []).map(item => {
                                                         // Find the actual item
                                                         let itemData = null;
@@ -7019,7 +6634,7 @@
                             <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-6">
                                 <p class="text-sm text-blue-800">
                                     💡 <strong>Note:</strong> Folders organize your contests, mergers, and extracts on the home page.
-                                    They appear as expandable cards when "With Folders" sort is selected.
+                                    They appear as expandable cards when "Newest First" sort is selected.
                                     Any other sort option will show all items in a flat list.
                                 </p>
                             </div>
@@ -7371,7 +6986,7 @@
             const app = document.getElementById('app');
             
             if (!state.isLoggedIn) {
-                app.innerHTML = renderHeader() + renderLoginScreen() + renderModal() + renderCompressionModal() + renderUploadProgressModal() + renderToast() + renderLoadingOverlay();
+                app.innerHTML = renderHeader() + renderLoginScreen() + renderModal() + renderUploadProgressModal() + renderToast() + renderLoadingOverlay();
                 return;
             }
 
@@ -7392,18 +7007,19 @@
                 case 'mergedResults':
                     content = renderMergedResults();
                     break;
+                case 'userProfile':
+                    content = renderUserProfile();
+                    break;
                 default:
                     content = renderHome();
             }
 
-            app.innerHTML = renderHeader() + content + renderModal() + renderCreateMergerModal() + renderCreateExtractModal() + renderUserProfileModal() + renderCompressionModal() + renderUploadProgressModal() + (state.showAdminDashboard ? renderAdminDashboard() : '') + (state.showAppSettingsModal ? renderAppSettingsModal() : '') + (state.showManageFoldersModal ? renderManageFoldersModal() : '') + renderToast() + renderLoadingOverlay();
+            app.innerHTML = renderHeader() + content + renderModal() + renderMergeModal() + renderCreateMergerModal() + renderCreateExtractModal() + renderUploadProgressModal() + (state.showAdminDashboard ? renderAdminDashboard() : '') + (state.showAppSettingsModal ? renderAppSettingsModal() : '') + (state.showManageFoldersModal ? renderManageFoldersModal() : '') + renderToast() + renderLoadingOverlay();
         }
 
         window.login = login;
         window.logout = logout;
         window.startCreateContest = startCreateContest;
-        window.showContestCreationDisabledModal = showContestCreationDisabledModal;
-        window.showRevotingDisabledModal = showRevotingDisabledModal;
         window.handleContestTitle = handleContestTitle;
         window.confirmCreateWithDuplicateTitle = confirmCreateWithDuplicateTitle;
         window.cancelCreateContest = cancelCreateContest;
@@ -7425,7 +7041,13 @@
         window.confirmRevote = confirmRevote;
         window.toggleUserDropdown = toggleUserDropdown;
         window.shareContest = shareContest;
+        window.toggleContestSelection = toggleContestSelection;
         window.shareMerge = shareMerge;
+        window.viewMerge = viewMerge;
+        window.openMergeModal = openMergeModal;
+        window.closeMergeModal = closeMergeModal;
+        window.viewSelectedMerge = viewSelectedMerge;
+        window.copyMergeLink = copyMergeLink;
         window.showBreakdownMerged = showBreakdownMerged;
         window.toggleContestLock = toggleContestLock;
         window.toggleResultsPublic = toggleResultsPublic;
@@ -7442,10 +7064,6 @@
         window.closeUploadProgress = closeUploadProgress;
         window.retryUpload = retryUpload;
         window.cancelAllUploads = cancelAllUploads;
-        window.closeCompressionModal = closeCompressionModal;
-        window.compressMoreImage = compressMoreImage;
-        window.cancelCompressionImage = cancelCompressionImage;
-        window.addOversizedImageAnyway = addOversizedImageAnyway;
         window.updateScale = updateScale;
         window.adjustScale = adjustScale;
         window.confirmSubmitVotes = confirmSubmitVotes;
@@ -7500,16 +7118,12 @@
         window.saveExtract = saveExtract;
         window.openManageFoldersModal = openManageFoldersModal;
         window.closeManageFoldersModal = closeManageFoldersModal;
-        window.showCreateFolderModal = showCreateFolderModal;
-        window.cancelCreateFolder = cancelCreateFolder;
-        window.confirmCreateFolder = confirmCreateFolder;
         window.createFolder = createFolder;
         window.deleteFolder = deleteFolder;
         window.addItemToFolder = addItemToFolder;
         window.removeItemFromFolder = removeItemFromFolder;
         window.toggleFolderExpanded = toggleFolderExpanded;
         window.viewUserProfile = viewUserProfile;
-        window.closeUserProfileModal = closeUserProfileModal;
 
         // Initialize app
         // Check for existing session on load
