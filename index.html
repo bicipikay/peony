@@ -496,12 +496,12 @@
             if (min >= 3.0) return { color: 'text-lime-700', bg: 'bg-lime-100', textColor: 'rgb(77, 124, 15)', bgColor: 'rgb(236, 252, 203)' };
             // Lemon yellow (2.5-2.99) - average, more saturated
             if (min >= 2.5) return { color: 'text-yellow-700', bg: 'bg-yellow-100', textColor: 'rgb(161, 98, 7)', bgColor: 'rgb(254, 249, 195)' };
-            // Gold/amber (2.0-2.49) - below average, distinct from orange
-            if (min >= 2.0) return { color: 'text-amber-700', bg: 'bg-amber-100', textColor: 'rgb(180, 83, 9)', bgColor: 'rgb(254, 243, 199)' };
-            // Orange (1.5-1.99) - low scores, distinct from red
-            if (min >= 1.5) return { color: 'text-orange-700', bg: 'bg-orange-100', textColor: 'rgb(194, 65, 12)', bgColor: 'rgb(255, 237, 213)' };
-            // Strong red (1.0-1.49) - lowest scores, bolder background
-            if (min >= 1.0) return { color: 'text-red-700', bg: 'bg-red-200', textColor: 'rgb(185, 28, 28)', bgColor: 'rgb(254, 202, 202)' };
+            // Gold/amber (2.0-2.49) - below average, warmer gold to distinguish from orange
+            if (min >= 2.0) return { color: 'text-amber-800', bg: 'bg-amber-100', textColor: 'rgb(146, 64, 14)', bgColor: 'rgb(254, 243, 199)' };
+            // Deep orange (1.5-1.99) - low scores, darker orange between red and amber
+            if (min >= 1.5) return { color: 'text-orange-800', bg: 'bg-orange-200', textColor: 'rgb(154, 52, 18)', bgColor: 'rgb(254, 215, 170)' };
+            // Deep red (1.0-1.49) - lowest scores, much redder and darker
+            if (min >= 1.0) return { color: 'text-red-800', bg: 'bg-red-300', textColor: 'rgb(153, 27, 27)', bgColor: 'rgb(252, 165, 165)' };
             // Fallback for any edge cases
             return { color: 'text-gray-600', bg: 'bg-gray-50', textColor: 'rgb(75, 85, 99)', bgColor: 'rgb(249, 250, 251)' };
         }
@@ -604,7 +604,7 @@
                         totalVotes: scores.length,
                         breakdown: imageScores[img.id]?.breakdown || []
                     };
-                }).sort((a, b) => b.averageScore - a.averageScore);
+                }).sort(compareWithTieBreaking);
 
                 console.log('🔍 DEBUG: Final results:', state.results);
             } catch (error) {
@@ -715,7 +715,7 @@
                 state.mergedResults = {
                     contestIds: contestIds,
                     contestTitles: contestTitles,
-                    images: allImages.sort((a, b) => b.averageScore - a.averageScore)
+                    images: allImages.sort(compareWithTieBreaking)
                 };
 
             } catch (error) {
@@ -1473,6 +1473,10 @@
                         const canvas = document.createElement('canvas');
                         const ctx = canvas.getContext('2d');
 
+                        // Preserve original file type (important for PNG transparency)
+                        const outputType = file.type || 'image/jpeg';
+                        const supportsQuality = outputType === 'image/jpeg' || outputType === 'image/webp';
+
                         // Helper to resize and draw
                         const drawResized = (maxSize) => {
                             let w = img.width;
@@ -1498,13 +1502,15 @@
                         const tryCompress = (quality, maxDimension) => {
                             return new Promise((res) => {
                                 drawResized(maxDimension);
+                                // Only use quality parameter for formats that support it
+                                const blobOptions = supportsQuality ? quality : undefined;
                                 canvas.toBlob((blob) => {
                                     if (blob) {
                                         res({ blob, quality, maxDimension });
                                     } else {
                                         res(null);
                                     }
-                                }, 'image/jpeg', quality);
+                                }, outputType, blobOptions);
                             });
                         };
 
@@ -1555,7 +1561,7 @@
                         // Check final result
                         if (result && result.blob.size <= maxSizeBytes) {
                             const compressedFile = new File([result.blob], file.name, {
-                                type: 'image/jpeg',
+                                type: outputType,
                                 lastModified: Date.now()
                             });
                             const savingsPercent = Math.round((1 - result.blob.size / file.size) * 100);
@@ -1573,7 +1579,7 @@
                             const finalSize = result ? result.blob.size : file.size;
                             reject({
                                 message: `${file.name}: ${formatFileSize(finalSize)} - too large even after compression (max ${maxSizeKB} KB)`,
-                                file: result ? new File([result.blob], file.name, { type: 'image/jpeg', lastModified: Date.now() }) : file,
+                                file: result ? new File([result.blob], file.name, { type: outputType, lastModified: Date.now() }) : file,
                                 originalSize: file.size,
                                 compressedSize: finalSize,
                                 success: false,
@@ -2136,6 +2142,58 @@
             }
         }
 
+        async function showContestInfoModal(item, itemType) {
+            try {
+                // Fetch voters for this contest/merger/extract
+                const contestId = item.id;
+                let voters = [];
+
+                // Query for voters who have completed voting
+                const votesResponse = await fetch(`${SUPABASE_URL}/rest/v1/votes?contest_id=eq.${contestId}&select=user_id,users!inner(id,username,avatar)`, {
+                    headers: {
+                        'apikey': SUPABASE_ANON_KEY,
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                        'Cache-Control': 'no-cache'
+                    }
+                });
+                const votesData = await votesResponse.json();
+
+                // Deduplicate voters and sort by username
+                if (Array.isArray(votesData)) {
+                    const uniqueVotersMap = new Map();
+                    votesData.forEach(vote => {
+                        if (vote.users) {
+                            uniqueVotersMap.set(vote.user_id, vote.users);
+                        }
+                    });
+                    voters = Array.from(uniqueVotersMap.values())
+                        .sort((a, b) => a.username.toLowerCase().localeCompare(b.username.toLowerCase()));
+                }
+
+                // Set state for modal
+                state.contestInfoModal = {
+                    item,
+                    itemType,
+                    voters
+                };
+
+                render();
+            } catch (error) {
+                console.error('Error loading contest info:', error);
+                showAlert('Failed to load contest info: ' + error.message, '❌');
+            }
+        }
+
+        function closeContestInfoModal() {
+            state.contestInfoModal = null;
+            render();
+        }
+
+        async function shareContestFromModal() {
+            if (!state.contestInfoModal) return;
+            await shareContest(state.contestInfoModal.item.id);
+        }
+
         function showBreakdownMerged(imageId) {
             state.showBreakdownModal = imageId;
             render();
@@ -2591,29 +2649,7 @@
                     throw new Error(contests.message || 'Failed to load contests');
                 }
 
-                // Fetch voter counts from the pre-calculated PostgreSQL view
-                const voterCountsResponse = await fetchFromSupabase('/rest/v1/contest_voter_counts?select=*');
-
-                if (!voterCountsResponse.ok) {
-                    console.error('Failed to fetch voter counts');
-                    throw new Error('Failed to load voter counts');
-                }
-
-                const voterCountsArray = await voterCountsResponse.json();
-
-                // Check if voter counts response is valid
-                if (!Array.isArray(voterCountsArray)) {
-                    console.error('Invalid voter counts response:', voterCountsArray);
-                    throw new Error(voterCountsArray.message || 'Failed to load voter counts');
-                }
-
-                // Create a map of contest_id to voter_count for efficient lookup
-                const voterCountsMap = {};
-                voterCountsArray.forEach(row => {
-                    voterCountsMap[row.contest_id] = row.voter_count;
-                });
-
-                // Map contests with their voter counts from the view
+                // Map contests with their voter counts from database fields
                 state.contests = contests.map(contest => ({
                     id: contest.id,
                     contestNumber: contest.contest_number,
@@ -2624,7 +2660,8 @@
                     creatorName: contest.creator.username,
                     creatorAvatar: contest.creator.avatar,
                     createdAt: contest.created_at,
-                    voterCount: voterCountsMap[contest.id] || 0,
+                    voterCountMin: contest.voter_count_min || 0,
+                    voterCountMax: contest.voter_count_max || 0,
                     images: contest.images
                         .sort((a, b) => a.image_order - b.image_order)
                         .map(img => ({
@@ -2666,6 +2703,8 @@
                         contestIds: m.contest_ids,
                         voterCountMin: m.voter_count_min,
                         voterCountMax: m.voter_count_max,
+                        isLocked: m.is_locked || false,
+                        resultsPublic: m.results_public !== false,
                         type: 'merger'
                     }));
                 }
@@ -2696,11 +2735,51 @@
                         sourceMergerId: e.source_type === 'merger' ? e.source_contest_id : null,
                         sourceType: e.source_type,
                         imageIds: e.image_ids,
+                        isLocked: e.is_locked || false,
+                        resultsPublic: e.results_public !== false,
                         type: 'extract'
                     }));
                 }
             } catch (error) {
                 console.error('Error loading extracts:', error);
+            }
+        }
+
+        async function ensurePinnedFolder() {
+            const PINNED_FOLDER_ID = 'd88c5bcc-8b54-44ab-bca9-ed186124bcd2';
+
+            try {
+                // Check if pinned folder exists
+                const response = await fetch(`${SUPABASE_URL}/rest/v1/groups?id=eq.${PINNED_FOLDER_ID}&select=*`, {
+                    headers: {
+                        'apikey': SUPABASE_ANON_KEY,
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                        'Cache-Control': 'no-cache'
+                    }
+                });
+                const existing = await response.json();
+
+                // If doesn't exist, create it
+                if (!existing || existing.length === 0) {
+                    console.log('Creating Pinned folder...');
+                    await fetch(`${SUPABASE_URL}/rest/v1/groups`, {
+                        method: 'POST',
+                        headers: {
+                            'apikey': SUPABASE_ANON_KEY,
+                            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                            'Content-Type': 'application/json',
+                            'Prefer': 'return=minimal'
+                        },
+                        body: JSON.stringify({
+                            id: PINNED_FOLDER_ID,
+                            name: 'Pinned',
+                            display_order: 0
+                        })
+                    });
+                    console.log('Pinned folder created successfully');
+                }
+            } catch (error) {
+                console.error('Error ensuring pinned folder:', error);
             }
         }
 
@@ -2946,21 +3025,35 @@
             render();
         }
 
-        async function toggleContestLock(contestId) {
-            const contest = state.contests.find(c => c.id === contestId);
-            if (!contest) return;
+        async function toggleContestLock(itemId) {
+            // Find item across all types
+            let item = state.contests.find(c => c.id === itemId);
+            let itemType = 'contest';
+            let tableName = 'contests';
+
+            if (!item) {
+                item = state.mergers.find(m => m.id === itemId);
+                itemType = 'merger';
+                tableName = 'mergers';
+            }
+            if (!item) {
+                item = state.extracts.find(e => e.id === itemId);
+                itemType = 'extract';
+                tableName = 'extracts';
+            }
+            if (!item) return;
 
             // Only the creator or admin can lock/unlock
-            if (contest.createdBy !== state.user.id && state.user.id !== ADMIN_DISCORD_ID) {
-                showAlert('Only the creator or admin can lock/unlock this contest.', '🔒');
+            if (item.createdBy !== state.user.id && state.user.id !== ADMIN_DISCORD_ID) {
+                showAlert('Only the creator or admin can lock/unlock this item.', '🔒');
                 return;
             }
 
-            const newLockStatus = !contest.isLocked;
+            const newLockStatus = !item.isLocked;
 
             try {
                 // Update database
-                const response = await fetch(`${SUPABASE_URL}/rest/v1/contests?id=eq.${contestId}`, {
+                const response = await fetch(`${SUPABASE_URL}/rest/v1/${tableName}?id=eq.${itemId}`, {
                     method: 'PATCH',
                     headers: {
                         'Content-Type': 'application/json',
@@ -2980,8 +3073,9 @@
                 }
 
                 // Update local state only if database update succeeded
-                contest.isLocked = newLockStatus;
-                showAlert(contest.isLocked ? '🔒 Contest locked - Users cannot vote' : '🔓 Contest unlocked - Users can now vote', contest.isLocked ? '🚨' : '✅');
+                item.isLocked = newLockStatus;
+                const itemLabel = itemType.charAt(0).toUpperCase() + itemType.slice(1);
+                showAlert(item.isLocked ? `🔒 ${itemLabel} locked - Users cannot vote` : `🔓 ${itemLabel} unlocked - Users can now vote`, item.isLocked ? '🚨' : '✅');
                 render();
             } catch (error) {
                 console.error('Full lock toggle error:', error);
@@ -2989,25 +3083,37 @@
             }
         }
 
-        async function toggleResultsPublic(contestId) {
+        async function toggleResultsPublic(itemId) {
             try {
-                const contest = state.contests.find(c => c.id === contestId);
-                if (!contest) {
-                    throw new Error('Contest not found');
+                // Find item across all types
+                let item = state.contests.find(c => c.id === itemId);
+                let tableName = 'contests';
+
+                if (!item) {
+                    item = state.mergers.find(m => m.id === itemId);
+                    tableName = 'mergers';
+                }
+                if (!item) {
+                    item = state.extracts.find(e => e.id === itemId);
+                    tableName = 'extracts';
+                }
+
+                if (!item) {
+                    throw new Error('Item not found');
                 }
 
                 // Check if user is creator or admin
                 const isAdmin = state.user && state.user.id === ADMIN_DISCORD_ID;
-                const isCreator = state.user && state.user.id === contest.createdBy;
+                const isCreator = state.user && state.user.id === item.createdBy;
 
                 if (!isAdmin && !isCreator) {
                     showAlert('Only the creator or admin can toggle results visibility', '❌');
                     return;
                 }
 
-                const newPublicStatus = !contest.resultsPublic;
+                const newPublicStatus = !item.resultsPublic;
 
-                const response = await fetch(`${SUPABASE_URL}/rest/v1/contests?id=eq.${contestId}`, {
+                const response = await fetch(`${SUPABASE_URL}/rest/v1/${tableName}?id=eq.${itemId}`, {
                     method: 'PATCH',
                     headers: {
                         'Content-Type': 'application/json',
@@ -3027,8 +3133,8 @@
                 }
 
                 // Update local state only if database update succeeded
-                contest.resultsPublic = newPublicStatus;
-                showAlert(contest.resultsPublic ? '👁️ Results public - Everyone can view' : '🔒 Results hidden - Only you can view', contest.resultsPublic ? '👁️' : '🔒');
+                item.resultsPublic = newPublicStatus;
+                showAlert(item.resultsPublic ? '👁️ Results public - Everyone can view' : '🔒 Results hidden - Only you can view', item.resultsPublic ? '👁️' : '🔒');
                 render();
             } catch (error) {
                 console.error('Results public toggle error:', error);
@@ -3531,17 +3637,7 @@
             setLoading('Creating extract...');
 
             try {
-                // Validate that all image IDs are valid UUIDs
-                const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-                const invalidIds = state.extractSelectedImages.filter(id => {
-                    return typeof id !== 'string' || !uuidRegex.test(id);
-                });
-
-                if (invalidIds.length > 0) {
-                    console.error('Invalid image IDs found:', invalidIds);
-                    throw new Error(`Database schema error: Image IDs must be UUIDs. Found invalid IDs: ${invalidIds.join(', ')}. Please contact the administrator to migrate the images table to use UUID primary keys.`);
-                }
-
+                // Image IDs are integers in the database
                 const extractData = {
                     name: state.newExtractName.trim(),
                     created_by: state.user.id,
@@ -3873,7 +3969,7 @@
                 }
                 return null;
             }).filter(img => img !== null)
-            .sort((a, b) => b.averageScore - a.averageScore);
+            .sort(compareWithTieBreaking);
 
             render();
         }
@@ -4299,6 +4395,64 @@
             }
         }
 
+        async function updateAppSetting(settingName, newValue) {
+            try {
+                // Update in database
+                // First, check if setting exists
+                const checkResponse = await fetch(`${SUPABASE_URL}/rest/v1/app_settings?setting_name=eq.${settingName}`, {
+                    headers: {
+                        'apikey': SUPABASE_ANON_KEY,
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                    }
+                });
+
+                const existingSettings = await checkResponse.json();
+
+                if (existingSettings.length > 0) {
+                    // Update existing setting
+                    const response = await fetch(`${SUPABASE_URL}/rest/v1/app_settings?setting_name=eq.${settingName}`, {
+                        method: 'PATCH',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'apikey': SUPABASE_ANON_KEY,
+                            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                        },
+                        body: JSON.stringify({
+                            value: newValue
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to update setting');
+                    }
+                } else {
+                    // Insert new setting
+                    const response = await fetch(`${SUPABASE_URL}/rest/v1/app_settings`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'apikey': SUPABASE_ANON_KEY,
+                            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                        },
+                        body: JSON.stringify({
+                            setting_name: settingName,
+                            value: newValue
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to create setting');
+                    }
+                }
+
+                // Update local state
+                state.appSettings[settingName] = newValue;
+            } catch (error) {
+                console.error('Error updating app setting:', error);
+                throw error;
+            }
+        }
+
         // ==================== FOLDER MANAGEMENT ====================
 
         function initializeFolderSortable() {
@@ -4311,30 +4465,99 @@
                 handle: '.cursor-move',
                 ghostClass: 'bg-blue-100',
                 onEnd: async (evt) => {
+                    // Skip if dropped at the same position
+                    if (evt.oldIndex === evt.newIndex) {
+                        return;
+                    }
+
+                    // Save scroll position before re-render
+                    const modalContent = document.querySelector('.overflow-y-auto');
+                    const scrollPos = modalContent ? modalContent.scrollTop : 0;
+
                     try {
-                        // Reorder the state.groups array
-                        const movedFolder = state.groups.splice(evt.oldIndex, 1)[0];
-                        state.groups.splice(evt.newIndex, 0, movedFolder);
+                        // Get all children to determine what was moved
+                        const children = Array.from(foldersList.children);
+                        const movedElement = evt.item;
+                        const isUnfolderedMoved = movedElement.hasAttribute('data-unfoldered');
 
-                        // Collect all update promises and execute in parallel
-                        const updatePromises = state.groups.map((group, index) =>
-                            saveFolderOrder(group.id, index)
-                        );
+                        // Get current unfoldered position
+                        const currentUnfolderedPos = state.appSettings.unfoldered_items_position !== undefined
+                            ? parseInt(state.appSettings.unfoldered_items_position)
+                            : state.groups.length;
 
-                        // Wait for all saves to complete before proceeding
-                        await Promise.all(updatePromises);
+                        if (isUnfolderedMoved) {
+                            // Unfoldered items meta-item was moved
+                            // The new index IS the new position (since it's in the combined list)
+                            const newUnfolderedPos = evt.newIndex;
+                            await updateAppSetting('unfoldered_items_position', newUnfolderedPos);
+                        } else {
+                            // A folder was moved
+                            // Need to adjust folder positions and possibly unfoldered position
+
+                            // Count folders before and after unfoldered in the NEW layout
+                            let newUnfolderedPos = currentUnfolderedPos;
+                            const unfolderedElement = children.find(c => c.hasAttribute('data-unfoldered'));
+                            if (unfolderedElement) {
+                                newUnfolderedPos = Array.from(foldersList.children).indexOf(unfolderedElement);
+                            }
+
+                            // Build mapping of folder IDs to new positions (excluding unfoldered item)
+                            const folderPositions = [];
+                            children.forEach((child, visualIndex) => {
+                                if (!child.hasAttribute('data-unfoldered')) {
+                                    const folderId = child.getAttribute('data-folder-id');
+                                    if (folderId) {
+                                        // Calculate actual folder position (excluding unfoldered item)
+                                        const actualPosition = visualIndex < newUnfolderedPos ? visualIndex : visualIndex - 1;
+                                        folderPositions.push({ folderId, position: actualPosition });
+                                    }
+                                }
+                            });
+
+                            // Reorder state.groups to match new positions
+                            const reorderedGroups = folderPositions
+                                .sort((a, b) => a.position - b.position)
+                                .map(fp => state.groups.find(g => g.id === fp.folderId))
+                                .filter(Boolean);
+
+                            state.groups = reorderedGroups;
+
+                            // Save all folder positions
+                            const updatePromises = state.groups.map((group, index) =>
+                                saveFolderOrder(group.id, index)
+                            );
+
+                            await Promise.all(updatePromises);
+
+                            // Update unfoldered position if it changed
+                            if (newUnfolderedPos !== currentUnfolderedPos) {
+                                await updateAppSetting('unfoldered_items_position', newUnfolderedPos);
+                            }
+                        }
 
                         // Only reload and re-render after successful save
                         await loadGroups();
                         render();
-                        setTimeout(initializeFolderSortable, 100);
+
+                        // Restore scroll position after render
+                        setTimeout(() => {
+                            const newModalContent = document.querySelector('.overflow-y-auto');
+                            if (newModalContent) newModalContent.scrollTop = scrollPos;
+                            initializeFolderSortable();
+                        }, 100);
                     } catch (error) {
                         console.error('Failed to save folder order:', error);
                         showToast('Failed to save folder order', 'error');
                         // Reload to revert visual state
                         await loadGroups();
                         render();
-                        setTimeout(initializeFolderSortable, 100);
+
+                        // Restore scroll position after render
+                        setTimeout(() => {
+                            const newModalContent = document.querySelector('.overflow-y-auto');
+                            if (newModalContent) newModalContent.scrollTop = scrollPos;
+                            initializeFolderSortable();
+                        }, 100);
                     }
                 }
             });
@@ -4348,6 +4571,15 @@
                         handle: '.cursor-move',
                         ghostClass: 'bg-blue-100',
                         onEnd: async (evt) => {
+                            // Skip if dropped at the same position
+                            if (evt.oldIndex === evt.newIndex) {
+                                return;
+                            }
+
+                            // Save scroll position before re-render
+                            const modalContent = document.querySelector('.overflow-y-auto');
+                            const scrollPos = modalContent ? modalContent.scrollTop : 0;
+
                             try {
                                 const folderId = itemsList.dataset.folderId;
                                 const folder = state.groups.find(g => g.id === folderId);
@@ -4368,14 +4600,26 @@
                                 // Only reload and re-render after successful save
                                 await loadGroups();
                                 render();
-                                setTimeout(initializeFolderSortable, 100);
+
+                                // Restore scroll position after render
+                                setTimeout(() => {
+                                    const newModalContent = document.querySelector('.overflow-y-auto');
+                                    if (newModalContent) newModalContent.scrollTop = scrollPos;
+                                    initializeFolderSortable();
+                                }, 100);
                             } catch (error) {
                                 console.error('Failed to save item order:', error);
                                 showToast('Failed to save item order', 'error');
                                 // Reload to revert visual state
                                 await loadGroups();
                                 render();
-                                setTimeout(initializeFolderSortable, 100);
+
+                                // Restore scroll position after render
+                                setTimeout(() => {
+                                    const newModalContent = document.querySelector('.overflow-y-auto');
+                                    if (newModalContent) newModalContent.scrollTop = scrollPos;
+                                    initializeFolderSortable();
+                                }, 100);
                             }
                         }
                     });
@@ -4795,6 +5039,13 @@
         }
 
         function toggleFolderExpanded(folderId) {
+            const PINNED_FOLDER_ID = 'd88c5bcc-8b54-44ab-bca9-ed186124bcd2';
+
+            // Pinned folder cannot be collapsed
+            if (folderId === PINNED_FOLDER_ID) {
+                return;
+            }
+
             const index = state.expandedFolderIds.indexOf(folderId);
             if (index > -1) {
                 state.expandedFolderIds.splice(index, 1);
@@ -4815,6 +5066,32 @@
             state.viewingUserId = userId;
             state.showUserProfileModal = true;
             document.body.classList.add('modal-open');
+
+            // Ensure allUsers is loaded
+            if (!state.allUsers || state.allUsers.length === 0) {
+                try {
+                    const usersResponse = await fetch(`${SUPABASE_URL}/rest/v1/users?select=*`, {
+                        headers: {
+                            'apikey': SUPABASE_ANON_KEY,
+                            'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                            'Cache-Control': 'no-cache'
+                        }
+                    });
+
+                    if (usersResponse.ok) {
+                        const users = await usersResponse.json();
+                        state.allUsers = users.map(user => ({
+                            id: user.id,
+                            username: user.username,
+                            avatar: user.avatar,
+                            isBanned: user.is_banned || false
+                        }));
+                    }
+                } catch (error) {
+                    console.error('Error loading users:', error);
+                    state.allUsers = [];
+                }
+            }
 
             // Fetch user's voting history
             try {
@@ -4840,6 +5117,7 @@
         function closeUserProfileModal() {
             state.showUserProfileModal = false;
             state.viewingUserId = null;
+            state.userProfileVotedContests = [];
             document.body.classList.remove('modal-open');
             render();
         }
@@ -5905,23 +6183,23 @@
 
                                 if (!contestCreationEnabled && !isAdmin) {
                                     return `
-                                        <button onclick="showContestCreationDisabledModal()" class="bg-gray-400 text-gray-200 px-4 py-2 rounded-lg font-semibold cursor-not-allowed opacity-50 text-sm">
+                                        <button onclick="showContestCreationDisabledModal()" class="bg-gray-400 text-gray-200 px-2 sm:px-4 py-2 rounded-lg font-semibold cursor-not-allowed opacity-50 text-xs sm:text-sm whitespace-nowrap">
                                             + Create Contest
                                         </button>
                                     `;
                                 }
 
                                 return `
-                                    <button onclick="startCreateContest()" class="bg-gradient-to-r from-green-500 to-green-700 text-white px-4 py-2 rounded-lg font-semibold hover:from-green-600 hover:to-green-800 transition shadow-lg text-sm">
+                                    <button onclick="startCreateContest()" class="bg-gradient-to-r from-green-500 to-green-700 text-white px-2 sm:px-4 py-2 rounded-lg font-semibold hover:from-green-600 hover:to-green-800 transition shadow-lg text-xs sm:text-sm whitespace-nowrap">
                                         + Create Contest
                                     </button>
                                 `;
                             })()}
                             ${state.user.id === ADMIN_DISCORD_ID ? `
-                                <button onclick="openCreateMergerModal()" class="bg-gradient-to-r from-purple-500 to-purple-600 text-white px-4 py-2 rounded-lg font-semibold hover:from-purple-600 hover:to-purple-700 transition shadow-lg text-sm">
+                                <button onclick="openCreateMergerModal()" class="bg-gradient-to-r from-purple-500 to-purple-600 text-white px-2 sm:px-4 py-2 rounded-lg font-semibold hover:from-purple-600 hover:to-purple-700 transition shadow-lg text-xs sm:text-sm whitespace-nowrap">
                                     + Create Merge
                                 </button>
-                                <button onclick="openCreateExtractModal()" class="bg-gradient-to-r from-yellow-500 to-yellow-700 text-white px-4 py-2 rounded-lg font-semibold hover:from-yellow-600 hover:to-yellow-800 transition shadow-lg text-sm">
+                                <button onclick="openCreateExtractModal()" class="bg-gradient-to-r from-yellow-500 to-yellow-700 text-white px-2 sm:px-4 py-2 rounded-lg font-semibold hover:from-yellow-600 hover:to-yellow-800 transition shadow-lg text-xs sm:text-sm whitespace-nowrap">
                                     + Create Extract
                                 </button>
                             ` : ''}
@@ -6008,8 +6286,56 @@
                             ...filteredContests.map(c => ({ ...c, itemType: 'contest' }))
                         ];
 
-                        // Sort by creation date (newest first by default)
-                        allItems.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+                        // Apply sorting based on selected sort option
+                        allItems.sort((a, b) => {
+                            // Get voter counts (handle both single voterCount and min/max ranges)
+                            const getVoterCount = (item) => {
+                                if (item.voterCountMax !== undefined) return item.voterCountMax;
+                                if (item.voterCount !== undefined) return item.voterCount;
+                                return 0;
+                            };
+                            const voterCountA = getVoterCount(a);
+                            const voterCountB = getVoterCount(b);
+
+                            // Get image/item counts
+                            const getItemCount = (item) => {
+                                if (item.images) return item.images.length;
+                                if (item.imageIds) return item.imageIds.length;
+                                return 0;
+                            };
+                            const itemCountA = getItemCount(a);
+                            const itemCountB = getItemCount(b);
+
+                            // Get titles/names for sorting
+                            const titleA = (a.title || a.name || '').toLowerCase();
+                            const titleB = (b.title || b.name || '').toLowerCase();
+
+                            switch (state.filters.sortBy) {
+                                case 'newest':
+                                case 'dateDesc':
+                                case 'withFolders':
+                                    return (b.createdAt || 0) - (a.createdAt || 0);
+                                case 'oldest':
+                                case 'dateAsc':
+                                    return (a.createdAt || 0) - (b.createdAt || 0);
+                                case 'titleAsc':
+                                    return titleA.localeCompare(titleB);
+                                case 'titleDesc':
+                                    return titleB.localeCompare(titleA);
+                                case 'mostVoted':
+                                case 'votersDesc':
+                                    return voterCountB - voterCountA;
+                                case 'leastVoted':
+                                case 'votersAsc':
+                                    return voterCountA - voterCountB;
+                                case 'imagesDesc':
+                                    return itemCountB - itemCountA;
+                                case 'imagesAsc':
+                                    return itemCountA - itemCountB;
+                                default:
+                                    return (b.createdAt || 0) - (a.createdAt || 0);
+                            }
+                        });
 
                         // Check if we should show folders (only when sort is withFolders and no filters)
                         const showFolders = state.filters.sortBy === 'withFolders' && !state.filters.createdBy && !state.filters.searchQuery;
@@ -6038,67 +6364,82 @@
                                 return 0;
                             });
 
-                            return `
-                                ${sortedGroups.map(group => {
-                                    const isPinned = group.id === PINNED_FOLDER_ID;
-                                    const isExpanded = isPinned || state.expandedFolderIds.includes(group.id);
-                                    // Get actual items for this folder
-                                    const folderItems = (group.items || []).map(item => {
-                                        if (item.item_type === 'contest') {
-                                            const contest = state.contests.find(c => c.id === item.item_id);
-                                            return contest ? { ...contest, itemType: 'contest' } : null;
-                                        } else if (item.item_type === 'merger') {
-                                            const merger = state.mergers.find(m => m.id === item.item_id);
-                                            return merger ? { ...merger, itemType: 'merger' } : null;
-                                        } else if (item.item_type === 'extract') {
-                                            const extract = state.extracts.find(e => e.id === item.item_id);
-                                            return extract ? { ...extract, itemType: 'extract' } : null;
-                                        }
-                                        return null;
-                                    }).filter(Boolean);
+                            // Get unfoldered items position from app settings (default to bottom if not set)
+                            const unfolderedPosition = state.appSettings.unfoldered_items_position !== undefined
+                                ? parseInt(state.appSettings.unfoldered_items_position)
+                                : sortedGroups.length;
 
-                                    const headerGradient = isPinned
-                                        ? 'bg-gradient-to-r from-red-400 to-red-600 hover:from-red-500 hover:to-red-700'
-                                        : 'bg-gradient-to-r from-mauve-400 to-mauve-600 hover:from-mauve-500 hover:to-mauve-700';
-                                    const contentGradient = isPinned
-                                        ? 'bg-gradient-to-b from-red-50 to-red-100'
-                                        : 'bg-gradient-to-b from-pink-50 to-pink-100';
+                            // Helper function to render a folder
+                            const renderFolder = (group) => {
+                                const isPinned = group.id === PINNED_FOLDER_ID;
+                                const isExpanded = isPinned || state.expandedFolderIds.includes(group.id);
+                                // Get actual items for this folder
+                                const folderItems = (group.items || []).map(item => {
+                                    if (item.item_type === 'contest') {
+                                        const contest = state.contests.find(c => c.id === item.item_id);
+                                        return contest ? { ...contest, itemType: 'contest' } : null;
+                                    } else if (item.item_type === 'merger') {
+                                        const merger = state.mergers.find(m => m.id === item.item_id);
+                                        return merger ? { ...merger, itemType: 'merger' } : null;
+                                    } else if (item.item_type === 'extract') {
+                                        const extract = state.extracts.find(e => e.id === item.item_id);
+                                        return extract ? { ...extract, itemType: 'extract' } : null;
+                                    }
+                                    return null;
+                                }).filter(Boolean);
 
-                                    return `
-                                        <div class="bg-white rounded-xl shadow-lg overflow-hidden mb-4 fade-in">
-                                            <div class="${headerGradient} p-4 cursor-pointer transition" onclick="toggleFolderExpanded('${group.id}')">
-                                                <div class="flex items-center gap-3 text-white">
-                                                    <svg class="w-5 h-5 transition-transform ${isExpanded ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-                                                    </svg>
+                                const headerGradient = isPinned
+                                    ? 'bg-gradient-to-r from-red-400 to-red-600 hover:from-red-500 hover:to-red-700'
+                                    : 'bg-gradient-to-r from-mauve-400 to-mauve-600 hover:from-mauve-500 hover:to-mauve-700';
+                                const contentGradient = isPinned
+                                    ? 'bg-gradient-to-b from-red-50 to-red-100'
+                                    : 'bg-gradient-to-b from-pink-50 to-pink-100';
+
+                                return `
+                                    <div class="bg-white rounded-xl shadow-lg overflow-hidden mb-4 fade-in">
+                                        <div class="${headerGradient} p-4 cursor-pointer transition" onclick="toggleFolderExpanded('${group.id}')">
+                                            <div class="flex items-center gap-3 text-white">
+                                                <svg class="w-5 h-5 transition-transform ${isExpanded ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                                                </svg>
+                                                ${isPinned ? `
+                                                    <span class="text-2xl">📌</span>
+                                                ` : `
                                                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/>
                                                     </svg>
-                                                    <h3 class="text-lg font-bold flex-1">${group.name}</h3>
-                                                    <span class="text-sm opacity-90">${folderItems.length} items</span>
+                                                `}
+                                                <div class="flex-1">
+                                                    <h3 class="text-lg font-bold">${group.name}</h3>
+                                                    ${isPinned ? `<p class="text-xs opacity-90 mt-0.5">Trending Must-Votes 🔥</p>` : ''}
+                                                </div>
+                                                <span class="text-sm opacity-90">${folderItems.length} items</span>
+                                            </div>
+                                        </div>
+                                        ${isExpanded ? `
+                                            <div class="p-4 ${contentGradient}">
+                                                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                                                    ${folderItems.map(item => {
+                                                        if (item.itemType === 'merger') {
+                                                            return renderMergerCard(item);
+                                                        } else if (item.itemType === 'extract') {
+                                                            return renderExtractCard(item);
+                                                        } else {
+                                                            return renderContestCard(item);
+                                                        }
+                                                    }).join('')}
                                                 </div>
                                             </div>
-                                            ${isExpanded ? `
-                                                <div class="p-4 ${contentGradient}">
-                                                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                                                        ${folderItems.map(item => {
-                                                            if (item.itemType === 'merger') {
-                                                                return renderMergerCard(item);
-                                                            } else if (item.itemType === 'extract') {
-                                                                return renderExtractCard(item);
-                                                            } else {
-                                                                return renderContestCard(item);
-                                                            }
-                                                        }).join('')}
-                                                    </div>
-                                                </div>
-                                            ` : ''}
-                                        </div>
-                                    `;
-                                }).join('')}
+                                        ` : ''}
+                                    </div>
+                                `;
+                            };
 
-                                ${ungroupedItems.length > 0 ? `
-                                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                            // Helper function to render unfoldered items
+                            const renderUnfolderedItems = () => {
+                                if (ungroupedItems.length === 0) return '';
+                                return `
+                                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
                                         ${ungroupedItems.map(item => {
                                             if (item.itemType === 'merger') {
                                                 return renderMergerCard(item);
@@ -6109,7 +6450,26 @@
                                             }
                                         }).join('')}
                                     </div>
-                                ` : ''}
+                                `;
+                            };
+
+                            // Build the output with unfoldered items at the correct position
+                            return `
+                                ${(() => {
+                                    let output = '';
+                                    sortedGroups.forEach((group, index) => {
+                                        // Insert unfoldered items before this folder if needed
+                                        if (index === unfolderedPosition) {
+                                            output += renderUnfolderedItems();
+                                        }
+                                        output += renderFolder(group);
+                                    });
+                                    // Insert unfoldered items at the end if position >= folder count
+                                    if (unfolderedPosition >= sortedGroups.length) {
+                                        output += renderUnfolderedItems();
+                                    }
+                                    return output;
+                                })()}
                             `;
                         } else {
                             // Show flat list when not using default sort or when no folders exist
@@ -6128,6 +6488,185 @@
                             `;
                         }
                     })()}
+                </div>
+            `;
+        }
+
+        function renderContestInfoModal() {
+            if (!state.contestInfoModal) return '';
+
+            const { item, itemType, voters } = state.contestInfoModal;
+            const isAdmin = state.user && state.user.id === ADMIN_DISCORD_ID;
+            const isCreator = state.user && state.user.id === item.createdBy;
+            const canManageSettings = isAdmin || isCreator;
+
+            // Format date
+            const createdDate = formatDate(item.createdAt);
+
+            // Get voter count display
+            let voterCountDisplay;
+            if (itemType === 'merger') {
+                voterCountDisplay = item.voterCountMin && item.voterCountMax
+                    ? `${item.voterCountMin}-${item.voterCountMax}👥`
+                    : '0👥';
+            } else {
+                voterCountDisplay = `${item.voterCount || 0}👥`;
+            }
+
+            // Get merged contests info (for mergers)
+            let mergedContestsHTML = '';
+            if (itemType === 'merger' && item.contestIds && item.contestIds.length > 0) {
+                const mergedContests = state.contests.filter(c => item.contestIds.includes(c.id));
+                mergedContestsHTML = `
+                    <details class="mt-2">
+                        <summary class="cursor-pointer font-semibold text-gray-700 hover:text-mauve-600 transition">
+                            Merged Contests (${mergedContests.length})
+                        </summary>
+                        <ul class="mt-2 ml-4 space-y-1">
+                            ${mergedContests.map(c => `
+                                <li class="text-sm text-gray-600">• ${c.title}</li>
+                            `).join('')}
+                        </ul>
+                    </details>
+                `;
+            }
+
+            // Get source info (for extracts)
+            let sourceHTML = '';
+            if (itemType === 'extract' && item.sourceType && item.sourceId) {
+                const sourceItem = item.sourceType === 'contest'
+                    ? state.contests.find(c => c.id === item.sourceId)
+                    : state.mergers.find(m => m.id === item.sourceId);
+                if (sourceItem) {
+                    const sourceName = sourceItem.title || sourceItem.name;
+                    sourceHTML = `
+                        <div class="mt-2">
+                            <span class="font-semibold text-gray-700">Source:</span>
+                            <span class="text-sm text-gray-600">${sourceName}</span>
+                        </div>
+                    `;
+                }
+            }
+
+            return `
+                <div class="fixed inset-0 modal-overlay flex items-center justify-center z-[70] p-4" onclick="event.target === this && closeContestInfoModal()">
+                    <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] flex flex-col" onclick="event.stopPropagation()">
+                        <!-- Header -->
+                        <div class="p-6 border-b border-gray-200 flex-shrink-0">
+                            <div class="flex items-start justify-between gap-4">
+                                <h2 class="text-2xl font-bold text-gray-800 flex-1">${item.title || item.name}</h2>
+                                <button onclick="closeContestInfoModal()" class="p-2 hover:bg-gray-100 rounded-lg transition flex-shrink-0">
+                                    <svg class="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Scrollable Content -->
+                        <div class="flex-1 overflow-y-auto p-6">
+                            <!-- Main Info Section -->
+                            <div class="mb-6">
+                                <div class="flex items-center gap-3 mb-3">
+                                    <img src="${item.creatorAvatar}" alt="${item.creatorName}" class="w-12 h-12 rounded-full cursor-pointer hover:ring-2 hover:ring-mauve-400 transition" onclick="viewUserProfile('${item.createdBy}')" />
+                                    <div>
+                                        <div class="font-semibold text-gray-800 cursor-pointer hover:text-mauve-600 transition" onclick="viewUserProfile('${item.createdBy}')">${item.creatorName}</div>
+                                        <div class="text-sm text-gray-500">${createdDate || 'Date unknown'}</div>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-2 gap-3 text-sm">
+                                    <div>
+                                        <span class="font-semibold text-gray-700">Images:</span>
+                                        <span class="text-gray-600">${item.images?.length || 0}🖼️</span>
+                                    </div>
+                                    <div>
+                                        <span class="font-semibold text-gray-700">Voters:</span>
+                                        <span class="text-gray-600">${voterCountDisplay}</span>
+                                    </div>
+                                </div>
+                                ${mergedContestsHTML}
+                                ${sourceHTML}
+                            </div>
+
+                            <!-- Actions Section (visible to all) -->
+                            <div class="mb-6 p-4 bg-gray-50 rounded-lg">
+                                <h3 class="font-semibold text-gray-800 mb-3">Actions</h3>
+                                <button
+                                    onclick="shareContestFromModal()"
+                                    class="w-full px-4 py-2 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-lg font-semibold hover:from-purple-600 hover:to-purple-700 transition shadow-md flex items-center justify-center gap-2"
+                                >
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
+                                    </svg>
+                                    Share
+                                </button>
+                            </div>
+
+                            <!-- Admin/Creator Settings Section -->
+                            ${canManageSettings ? `
+                                <div class="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                                    <h3 class="font-semibold text-gray-800 mb-3">Settings (Creator/Admin Only)</h3>
+                                    <div class="space-y-3">
+                                        <!-- Lock Toggle -->
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex items-center gap-2">
+                                                <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                                                </svg>
+                                                <span class="font-medium text-gray-700">Lock Contest</span>
+                                            </div>
+                                            <button
+                                                onclick="toggleContestLock('${item.id}'); closeContestInfoModal();"
+                                                class="px-3 py-1 rounded-lg font-semibold transition text-sm ${item.isLocked ? 'bg-black text-white hover:bg-gray-900' : 'bg-green-500 text-white hover:bg-green-600'}"
+                                            >
+                                                ${item.isLocked ? '🔒 Locked' : '🔓 Unlocked'}
+                                            </button>
+                                        </div>
+                                        <!-- Results Visibility Toggle -->
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex items-center gap-2">
+                                                <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                                                </svg>
+                                                <span class="font-medium text-gray-700">Results Visibility</span>
+                                            </div>
+                                            <button
+                                                onclick="toggleResultsPublic('${item.id}'); closeContestInfoModal();"
+                                                class="px-3 py-1 rounded-lg font-semibold transition text-sm ${item.resultsPublic !== false ? 'bg-green-500 text-white hover:bg-green-600' : 'bg-black text-white hover:bg-gray-900'}"
+                                            >
+                                                ${item.resultsPublic !== false ? '👁️ Public' : '🔒 Private'}
+                                            </button>
+                                        </div>
+                                        <!-- Delete Button -->
+                                        <button
+                                            onclick="deleteContest('${item.id}'); closeContestInfoModal();"
+                                            class="w-full px-4 py-2 bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 transition text-sm"
+                                        >
+                                            🗑️ Delete ${itemType === 'contest' ? 'Contest' : itemType === 'merger' ? 'Merger' : 'Extract'}
+                                        </button>
+                                    </div>
+                                </div>
+                            ` : ''}
+
+                            <!-- Voters Section -->
+                            <div class="p-4 bg-blue-50 rounded-lg">
+                                <h3 class="font-semibold text-gray-800 mb-3">Voters (${voters.length})</h3>
+                                ${voters.length > 0 ? `
+                                    <div class="space-y-2 max-h-64 overflow-y-auto">
+                                        ${voters.map(voter => `
+                                            <div class="flex items-center gap-3 p-2 hover:bg-blue-100 rounded-lg transition cursor-pointer" onclick="viewUserProfile('${voter.id}')">
+                                                <img src="${voter.avatar}" alt="${voter.username}" class="w-8 h-8 rounded-full" />
+                                                <span class="text-sm font-medium text-gray-700">${voter.username}</span>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                ` : `
+                                    <p class="text-sm text-gray-600 text-center py-4">No votes yet</p>
+                                `}
+                            </div>
+                        </div>
+                    </div>
                 </div>
             `;
         }
@@ -6157,7 +6696,19 @@
             }
 
             if (!userInfo) {
-                return '<div class="text-center p-8">User not found</div>';
+                return `
+                    <div class="fixed inset-0 modal-overlay flex items-center justify-center z-[60] p-4" onclick="event.target === this && closeUserProfileModal()">
+                        <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 modal-content flex flex-col" onclick="event.stopPropagation()">
+                            <div class="text-center">
+                                <p class="text-xl font-bold text-gray-800 mb-4">User Not Found</p>
+                                <p class="text-gray-600 mb-6">The requested user profile could not be loaded.</p>
+                                <button onclick="closeUserProfileModal()" class="bg-mauve-500 text-white px-6 py-2 rounded-lg hover:bg-mauve-600 transition">
+                                    Close
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
             }
 
             // Find items created by this user
@@ -6168,21 +6719,19 @@
             // Find items voted on by this user (using fetched vote data)
             const userVotedContestIds = state.userProfileVotedContests || [];
 
-            // Get contests this user has voted on (excluding ones they created to avoid duplication)
+            // Get contests this user has voted on (INCLUDING ones they created)
             const votedContests = state.contests.filter(contest =>
-                userVotedContestIds.includes(contest.id) && contest.createdBy !== userId
+                userVotedContestIds.includes(contest.id)
             );
 
-            // Get mergers where user voted on source contests (excluding ones they created)
+            // Get mergers where user voted on source contests (INCLUDING ones they created)
             const votedMergers = state.mergers.filter(merger => {
-                if (merger.createdBy === userId) return false;
                 const sourceContestIds = merger.contestIds || [];
                 return sourceContestIds.some(contestId => userVotedContestIds.includes(contestId));
             });
 
-            // Get extracts where user voted on source (excluding ones they created)
+            // Get extracts where user voted on source (INCLUDING ones they created)
             const votedExtracts = state.extracts.filter(extract => {
-                if (extract.createdBy === userId) return false;
                 if (extract.sourceType === 'contest') {
                     return userVotedContestIds.includes(extract.sourceContestId);
                 } else if (extract.sourceType === 'merger') {
@@ -6241,16 +6790,15 @@
                             <!-- Created Items Section -->
                             ${allCreatedItems.length > 0 ? `
                                 <div class="mb-6">
-                                    <h3 class="text-lg font-bold text-gray-800 mb-3">Created (${allCreatedItems.length})</h3>
-                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <h3 class="text-lg font-bold text-gray-800 mb-3">Contests Created (${allCreatedItems.length})</h3>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
                                         ${allCreatedItems.map(item => {
-                                            if (item.itemType === 'merger') {
-                                                return renderMergerCard(item);
-                                            } else if (item.itemType === 'extract') {
-                                                return renderExtractCard(item);
-                                            } else {
-                                                return renderContestCard(item);
-                                            }
+                                            const title = item.title || item.name;
+                                            return `
+                                                <div class="text-sm text-gray-700 hover:text-mauve-600 transition p-2 hover:bg-gray-50 rounded">
+                                                    • ${title}
+                                                </div>
+                                            `;
                                         }).join('')}
                                     </div>
                                 </div>
@@ -6258,7 +6806,7 @@
 
                             <!-- Voting History Section -->
                             <div class="mb-4">
-                                <h3 class="text-lg font-bold text-gray-800 mb-3">Voting History (${allVotedItems.length})</h3>
+                                <h3 class="text-lg font-bold text-gray-800 mb-3">Contests Voted On (${allVotedItems.length})</h3>
                             </div>
 
                             ${allVotedItems.length === 0 ? `
@@ -6266,15 +6814,14 @@
                                     <p class="text-gray-500">No voting history yet</p>
                                 </div>
                             ` : `
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
                                     ${allVotedItems.map(item => {
-                                        if (item.itemType === 'merger') {
-                                            return renderMergerCard(item);
-                                        } else if (item.itemType === 'extract') {
-                                            return renderExtractCard(item);
-                                        } else {
-                                            return renderContestCard(item);
-                                        }
+                                        const title = item.title || item.name;
+                                        return `
+                                            <div class="text-sm text-gray-700 hover:text-mauve-600 transition p-2 hover:bg-gray-50 rounded">
+                                                • ${title}
+                                            </div>
+                                        `;
                                     }).join('')}
                                 </div>
                             `}
@@ -6296,46 +6843,19 @@
         function renderContestCard(contest) {
                         try {
                                 const hasVoted = state.userVotedContests[contest.id];
-                                const voterCount = contest.voterCount || 0;
+                                // Display voter range (min-max) or single value if they're equal
+                                const voterDisplay = contest.voterCountMin !== undefined && contest.voterCountMax !== undefined
+                                    ? (contest.voterCountMin === contest.voterCountMax
+                                        ? `${contest.voterCountMax}👥`
+                                        : `${contest.voterCountMin}-${contest.voterCountMax}👥`)
+                                    : '0👥';
                             const canDelete = canDeleteContest(contest);
                             const isBanned = state.bannedUsers.includes(state.user.id);
                             const createdDate = formatDate(contest.createdAt);
 
                             return `
                                 <div class="bg-white rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition fade-in p-4 relative">
-                                    ${(contest.createdBy === state.user.id || state.user.id === ADMIN_DISCORD_ID) ? `
-                                        <button
-                                            onclick='toggleResultsPublic("${contest.id}")'
-                                            class="absolute top-3 right-14 p-1.5 rounded-full shadow-lg transition-all hover:scale-110 ${contest.resultsPublic !== false ? 'bg-green-500 hover:bg-green-600' : 'bg-black hover:bg-gray-900'}"
-                                            title="${contest.resultsPublic !== false ? 'Results are public - Click to make private' : 'Results are private - Click to make public'}"
-                                        >
-                                            ${contest.resultsPublic !== false ? `
-                                                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-                                                </svg>
-                                            ` : `
-                                                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/>
-                                                </svg>
-                                            `}
-                                        </button>
-                                        <button
-                                            onclick='toggleContestLock("${contest.id}")'
-                                            class="absolute top-3 right-3 p-1.5 rounded-full shadow-lg transition-all hover:scale-110 ${contest.isLocked ? 'bg-black hover:bg-gray-900' : 'bg-green-500 hover:bg-green-600'}"
-                                            title="${contest.isLocked ? 'Click to unlock contest' : 'Click to lock contest'}"
-                                        >
-                                            ${contest.isLocked ? `
-                                                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
-                                                </svg>
-                                            ` : `
-                                                <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"/>
-                                                </svg>
-                                            `}
-                                        </button>
-                                    ` : contest.isLocked ? `
+                                    ${contest.isLocked ? `
                                         <div class="absolute top-3 right-3 bg-black text-white p-1.5 rounded-full shadow-lg" title="Contest is locked">
                                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
@@ -6349,8 +6869,8 @@
                                                 <h3 class="text-base font-bold text-gray-800 line-clamp-2">${contest.title}</h3>
                                             </div>
                                             <div class="text-xs text-gray-500 flex items-center gap-2 flex-wrap">
-                                                <span class="truncate">by <span class="cursor-pointer hover:text-mauve-600 transition" onclick="event.stopPropagation(); viewUserProfile('${contest.createdBy}');">${contest.creatorName}</span>${createdDate ? ` • ${createdDate}` : ''}</span>
-                                                <span class="ml-auto whitespace-nowrap">${voterCount}👥 ${contest.images.length}🖼️</span>
+                                                <span class="truncate">by <span class="cursor-pointer hover:text-mauve-600 transition" onclick="event.stopPropagation(); viewUserProfile('${contest.createdBy}');">${contest.creatorName}</span></span>
+                                                <span class="ml-auto whitespace-nowrap">${voterDisplay} ${contest.images.length}🖼️</span>
                                             </div>
                                         </div>
                                     </div>
@@ -6391,23 +6911,12 @@
                                             </button>
                                         `}
                                         <button
-                                            onclick='shareContest("${contest.id}")'
-                                            class="bg-gradient-to-r from-purple-500 to-purple-600 text-white px-3 py-2 rounded-lg font-semibold hover:from-purple-600 hover:to-purple-700 transition shadow-md text-sm flex items-center gap-1"
-                                            title="Share contest"
+                                            onclick='showContestInfoModal(${safeStringify(contest)}, "contest")'
+                                            class="bg-gradient-to-r from-blue-400 to-blue-600 text-white px-3 py-2 rounded-lg font-semibold hover:from-blue-500 hover:to-blue-700 transition shadow-md text-sm flex items-center gap-1"
+                                            title="Contest Info"
                                         >
-                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
-                                            </svg>
+                                            ℹ️
                                         </button>
-                                        ${canDelete ? `
-                                            <button
-                                                onclick="deleteContest('${contest.id}')"
-                                                class="bg-red-500 text-white px-3 py-2 rounded-lg font-semibold hover:bg-red-600 transition text-sm"
-                                                title="Delete Contest"
-                                            >
-                                                🗑️
-                                            </button>
-                                        ` : ''}
                                     </div>
                                 </div>
                             `;
@@ -6448,18 +6957,6 @@
                         </div>
                     </div>
 
-                    <!-- Dropdown of merged contests -->
-                    <details class="mb-2">
-                        <summary class="cursor-pointer text-xs text-blue-700 hover:text-blue-900 font-semibold">
-                            Merged Contests (${mergedContests.length})
-                        </summary>
-                        <div class="mt-1 pl-2 space-y-1">
-                            ${mergedContests.map(c => `
-                                <div class="text-xs text-blue-600">• ${c.title}</div>
-                            `).join('')}
-                        </div>
-                    </details>
-
                     <div class="flex gap-2">
                         ${isBanned ? `
                             <div class="flex-1 bg-red-100 border border-red-400 text-red-700 py-2 rounded-lg text-center text-xs">
@@ -6475,7 +6972,7 @@
                         ` : hasVotedNone ? `
                             <button
                                 onclick='startMergerVoting("${merger.id}")'
-                                class="flex-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white py-2 rounded-lg font-semibold hover:from-blue-600 hover:to-blue-700 transition shadow-md text-sm"
+                                class="flex-1 bg-gradient-to-r from-mauve-400 to-mauve-600 text-white py-2 rounded-lg font-semibold hover:from-mauve-500 hover:to-mauve-700 transition shadow-md text-sm"
                             >
                                 Start Voting
                             </button>
@@ -6488,23 +6985,12 @@
                             </button>
                         `}
                         <button
-                            onclick='shareMerger("${merger.id}")'
-                            class="bg-gradient-to-r from-purple-500 to-purple-600 text-white px-3 py-2 rounded-lg font-semibold hover:from-purple-600 hover:to-purple-700 transition shadow-md text-sm flex items-center gap-1"
-                            title="Share merger"
+                            onclick='showContestInfoModal(${safeStringify(merger)}, "merger")'
+                            class="bg-gradient-to-r from-blue-400 to-blue-600 text-white px-3 py-2 rounded-lg font-semibold hover:from-blue-500 hover:to-blue-700 transition shadow-md text-sm flex items-center gap-1"
+                            title="Merger Info"
                         >
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
-                            </svg>
+                            ℹ️
                         </button>
-                        ${state.user.id === ADMIN_DISCORD_ID ? `
-                            <button
-                                onclick="deleteMerger('${merger.id}')"
-                                class="bg-red-500 text-white px-3 py-2 rounded-lg font-semibold hover:bg-red-600 transition text-sm"
-                                title="Delete Merger"
-                            >
-                                🗑️
-                            </button>
-                        ` : ''}
                     </div>
                 </div>
             `;
@@ -6531,15 +7017,6 @@
             return `
                 <div class="bg-yellow-50 border-2 border-yellow-400 rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition fade-in p-4 relative">
                     <div class="absolute top-2 left-2 bg-yellow-500 text-white px-2 py-0.5 rounded text-xs font-bold">EXTRACT</div>
-                    ${state.user.id === ADMIN_DISCORD_ID ? `
-                        <button
-                            onclick="deleteExtract('${extract.id}')"
-                            class="absolute top-3 right-3 bg-red-500 text-white px-2 py-1 rounded-lg font-semibold hover:bg-red-600 transition text-xs"
-                            title="Delete Extract"
-                        >
-                            🗑️
-                        </button>
-                    ` : ''}
                     <div class="flex items-start gap-2 mb-2 mt-6">
                         <img src="${extract.creatorAvatar}" alt="${extract.creatorName}" class="w-8 h-8 rounded-full flex-shrink-0 cursor-pointer hover:ring-2 hover:ring-yellow-400 transition" onclick="event.stopPropagation(); viewUserProfile('${extract.createdBy}');" />
                         <div class="flex-1 min-w-0">
@@ -6547,7 +7024,7 @@
                                 <h3 class="text-base font-bold text-yellow-900 truncate">${extract.name}</h3>
                             </div>
                             <div class="text-xs text-yellow-700 flex items-center gap-2 flex-wrap">
-                                <span class="truncate">by <span class="cursor-pointer hover:text-yellow-900 transition" onclick="event.stopPropagation(); viewUserProfile('${extract.createdBy}');">${extract.creatorName}</span>${createdDate ? ` • ${createdDate}` : ''}</span>
+                                <span class="truncate">by <span class="cursor-pointer hover:text-yellow-900 transition" onclick="event.stopPropagation(); viewUserProfile('${extract.createdBy}');">${extract.creatorName}</span></span>
                                 <span class="ml-auto whitespace-nowrap">${imageCount}🖼️</span>
                             </div>
                             <div class="text-xs text-yellow-600 mt-1">
@@ -6575,6 +7052,13 @@
                                 View Results
                             </button>
                         `}
+                        <button
+                            onclick='showContestInfoModal(${safeStringify(extract)}, "extract")'
+                            class="bg-gradient-to-r from-blue-400 to-blue-600 text-white px-3 py-2 rounded-lg font-semibold hover:from-blue-500 hover:to-blue-700 transition shadow-md text-sm flex items-center gap-1"
+                            title="Extract Info"
+                        >
+                            ℹ️
+                        </button>
                     </div>
                 </div>
             `;
@@ -6714,6 +7198,13 @@
             const currentVote = state.votes[currentImage.id];
             const allVoted = state.shuffledImages.every(img => state.votes[img.id]);
 
+            // Determine voting context (contest or merger)
+            const isMergerVoting = state.currentMergerId && !state.currentContest;
+            const votingTitle = isMergerVoting
+                ? (state.mergers.find(m => m.id === state.currentMergerId)?.name || 'Merger Voting')
+                : (state.currentContest?.title || 'Voting');
+            const labelsEnabled = state.currentContest?.labelsEnabled || false;
+
             // Adaptive progress bar logic - ensure EXACTLY segmentCount dashes
             const imageCount = state.shuffledImages.length;
             const segmentCount = Math.min(imageCount, 20);
@@ -6763,12 +7254,12 @@
 
                         <div class="p-3">
                             <div class="flex justify-between items-center mb-3 gap-2">
-                                <h2 class="text-lg font-bold text-gray-800">${state.currentContest.title}</h2>
+                                <h2 class="text-lg font-bold text-gray-800">${votingTitle}</h2>
                                 <span class="text-gray-600 font-medium text-sm">${state.currentImageIndex + 1}/${state.shuffledImages.length}</span>
                             </div>
 
                             <div class="relative mb-3 bg-gray-100 overflow-hidden flex items-center justify-center" style="height: 55vh;">
-                                ${state.currentContest.labelsEnabled && currentImage.label ? `
+                                ${labelsEnabled && currentImage.label ? `
                                     <div class="absolute top-0 left-0 right-0 bg-white px-4 py-2 text-center border-b border-gray-200 z-10">
                                         <span class="text-sm font-semibold text-gray-800">${currentImage.label}</span>
                                     </div>
@@ -7519,6 +8010,19 @@
                 });
             });
 
+            // Calculate ungrouped items count
+            const allItems = [...state.contests.map(c => ({ itemType: 'contest', id: c.id })),
+                            ...state.mergers.map(m => ({ itemType: 'merger', id: m.id })),
+                            ...state.extracts.map(e => ({ itemType: 'extract', id: e.id }))];
+            const ungroupedItemsCount = allItems.filter(item =>
+                !itemsInFolders.has(`${item.itemType}:${item.id}`)
+            ).length;
+
+            // Get unfoldered items position from app settings (default to bottom if not set)
+            const unfolderedPosition = state.appSettings.unfoldered_items_position !== undefined
+                ? parseInt(state.appSettings.unfoldered_items_position)
+                : state.groups.length;
+
             return `
                 <div class="fixed inset-0 modal-overlay flex items-center justify-center z-[60] p-4" onclick="event.target === this && closeManageFoldersModal()">
                     <div class="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden modal-content flex flex-col" onclick="event.stopPropagation()">
@@ -7540,74 +8044,113 @@
                                 </button>
                             </div>
 
-                            ${state.groups.length === 0 ? `
+                            ${state.groups.length === 0 && ungroupedItemsCount === 0 ? `
                                 <div class="text-center py-8 text-gray-500">
                                     <p class="text-lg mb-2">No folders yet</p>
                                     <p class="text-sm">Create a folder to organize your contests, mergers, and extracts</p>
                                 </div>
                             ` : `
                                 <div class="space-y-4" id="folders-list">
-                                    ${state.groups.map(group => `
-                                        <div class="border border-gray-300 rounded-lg overflow-hidden">
-                                            <div class="bg-gray-50 p-4 flex items-center gap-3">
-                                                <div class="cursor-move text-gray-400 hover:text-gray-600">
-                                                    ⋮⋮
-                                                </div>
-                                                <div class="flex-1">
-                                                    <h4 class="font-semibold text-gray-800">${group.name}</h4>
-                                                    <p class="text-sm text-gray-600">${(group.items || []).length} items</p>
-                                                </div>
-                                                <button onclick="addItemToFolder('${group.id}')" class="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 text-sm">
-                                                    + Add Item
-                                                </button>
-                                                <button onclick="deleteFolder('${group.id}')" class="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600 text-sm">
-                                                    Delete
-                                                </button>
-                                            </div>
-                                            ${(group.items || []).length > 0 ? `
-                                                <div class="p-4 bg-white space-y-2" id="folder-items-${group.id}" data-folder-id="${group.id}">
-                                                    ${(group.items || []).map(item => {
-                                                        // Find the actual item
-                                                        let itemData = null;
-                                                        let itemTitle = 'Unknown';
-                                                        if (item.item_type === 'contest') {
-                                                            itemData = state.contests.find(c => c.id === item.item_id);
-                                                            itemTitle = itemData?.title || 'Unknown Contest';
-                                                        } else if (item.item_type === 'merger') {
-                                                            itemData = state.mergers.find(m => m.id === item.item_id);
-                                                            itemTitle = itemData?.name || 'Unknown Merger';
-                                                        } else if (item.item_type === 'extract') {
-                                                            itemData = state.extracts.find(e => e.id === item.item_id);
-                                                            itemTitle = itemData?.name || 'Unknown Extract';
-                                                        }
+                                    ${(() => {
+                                        // Build the sorted list with unfoldered items meta-item
+                                        const items = [];
+                                        state.groups.forEach((group, index) => {
+                                            items.push({ type: 'folder', data: group, originalIndex: index });
+                                        });
+                                        // Insert unfoldered items meta-item at the specified position
+                                        items.splice(unfolderedPosition, 0, { type: 'unfoldered', data: null });
 
-                                                        return `
-                                                            <div class="flex items-center gap-3 p-2 bg-gray-50 rounded">
-                                                                <div class="cursor-move text-gray-400 hover:text-gray-600 text-xs">
-                                                                    ⋮⋮
-                                                                </div>
-                                                                <div class="flex-1">
-                                                                    <span class="text-sm font-medium text-gray-800">${itemTitle}</span>
-                                                                    <span class="text-xs text-gray-500 ml-2">[${item.item_type.toUpperCase()}]</span>
-                                                                </div>
-                                                                <button onclick="removeItemFromFolder('${group.id}', '${item.item_id}', '${item.item_type}')" class="text-red-500 hover:text-red-700 text-sm">
-                                                                    Remove
-                                                                </button>
+                                        return items.map((item, index) => {
+                                            if (item.type === 'unfoldered') {
+                                                return `
+                                                    <div class="border border-gray-300 rounded-lg overflow-hidden bg-gradient-to-r from-gray-100 to-gray-200" data-unfoldered="true">
+                                                        <div class="bg-gray-100 p-4 flex items-center gap-3">
+                                                            <div class="cursor-move text-gray-400 hover:text-gray-600">
+                                                                ⋮⋮
                                                             </div>
-                                                        `;
-                                                    }).join('')}
-                                                </div>
-                                            ` : ''}
-                                        </div>
-                                    `).join('')}
+                                                            <div class="flex-1">
+                                                                <h4 class="font-semibold text-gray-700 flex items-center gap-2">
+                                                                    <span>📋</span>
+                                                                    <span>Unfoldered Items</span>
+                                                                </h4>
+                                                                <p class="text-sm text-gray-600">${ungroupedItemsCount} items (not draggable within)</p>
+                                                            </div>
+                                                            <span class="text-xs text-gray-500 italic">Special Section</span>
+                                                        </div>
+                                                    </div>
+                                                `;
+                                            } else {
+                                                const group = item.data;
+                                                const isExpanded = state.expandedFolderIds.includes(group.id);
+                                                return `
+                                                    <div class="border border-gray-300 rounded-lg overflow-hidden" data-folder-id="${group.id}">
+                                                        <div class="bg-gray-50 p-4 flex items-center gap-3">
+                                                            <div class="cursor-move text-gray-400 hover:text-gray-600">
+                                                                ⋮⋮
+                                                            </div>
+                                                            <button onclick="event.stopPropagation(); toggleFolderExpanded('${group.id}')" class="text-gray-600 hover:text-gray-800 transition">
+                                                                <svg class="w-5 h-5 transition-transform ${isExpanded ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                                                                </svg>
+                                                            </button>
+                                                            <div class="flex-1">
+                                                                <h4 class="font-semibold text-gray-800">${group.name}</h4>
+                                                                <p class="text-sm text-gray-600">${(group.items || []).length} items</p>
+                                                            </div>
+                                                            <button onclick="addItemToFolder('${group.id}')" class="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 text-sm">
+                                                                + Add Item
+                                                            </button>
+                                                            <button onclick="deleteFolder('${group.id}')" class="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600 text-sm">
+                                                                Delete
+                                                            </button>
+                                                        </div>
+                                                        ${isExpanded && (group.items || []).length > 0 ? `
+                                                            <div class="p-4 bg-white space-y-2" id="folder-items-${group.id}" data-folder-id="${group.id}">
+                                                                ${(group.items || []).map(item => {
+                                                                    // Find the actual item
+                                                                    let itemData = null;
+                                                                    let itemTitle = 'Unknown';
+                                                                    if (item.item_type === 'contest') {
+                                                                        itemData = state.contests.find(c => c.id === item.item_id);
+                                                                        itemTitle = itemData?.title || 'Unknown Contest';
+                                                                    } else if (item.item_type === 'merger') {
+                                                                        itemData = state.mergers.find(m => m.id === item.item_id);
+                                                                        itemTitle = itemData?.name || 'Unknown Merger';
+                                                                    } else if (item.item_type === 'extract') {
+                                                                        itemData = state.extracts.find(e => e.id === item.item_id);
+                                                                        itemTitle = itemData?.name || 'Unknown Extract';
+                                                                    }
+
+                                                                    return `
+                                                                        <div class="flex items-center gap-3 p-2 bg-gray-50 rounded">
+                                                                            <div class="cursor-move text-gray-400 hover:text-gray-600 text-xs">
+                                                                                ⋮⋮
+                                                                            </div>
+                                                                            <div class="flex-1">
+                                                                                <span class="text-sm font-medium text-gray-800">${itemTitle}</span>
+                                                                                <span class="text-xs text-gray-500 ml-2">[${item.item_type.toUpperCase()}]</span>
+                                                                            </div>
+                                                                            <button onclick="removeItemFromFolder('${group.id}', '${item.item_id}', '${item.item_type}')" class="text-red-500 hover:text-red-700 text-sm">
+                                                                                Remove
+                                                                            </button>
+                                                                        </div>
+                                                                    `;
+                                                                }).join('')}
+                                                            </div>
+                                                        ` : ''}
+                                                    </div>
+                                                `;
+                                            }
+                                        }).join('');
+                                    })()}
                                 </div>
                             `}
 
                             <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-6">
                                 <p class="text-sm text-blue-800">
                                     💡 <strong>Note:</strong> Folders organize your contests, mergers, and extracts on the home page.
-                                    They appear as expandable cards when "With Folders" sort is selected.
-                                    Any other sort option will show all items in a flat list.
+                                    Drag the "Unfoldered Items" section to position it above or below specific folders.
+                                    Click the arrow to expand/collapse folders and see their items.
                                 </p>
                             </div>
                         </div>
@@ -8014,7 +8557,7 @@
                     content = renderHome();
             }
 
-            app.innerHTML = renderHeader() + content + renderModal() + renderCreateMergerModal() + renderCreateExtractModal() + renderUserProfileModal() + renderCompressionModal() + renderUploadProgressModal() + (state.showAdminDashboard ? renderAdminDashboard() : '') + (state.showAppSettingsModal ? renderAppSettingsModal() : '') + (state.showManageFoldersModal ? renderManageFoldersModal() : '') + renderToast() + renderLoadingOverlay();
+            app.innerHTML = renderHeader() + content + renderModal() + renderContestInfoModal() + renderCreateMergerModal() + renderCreateExtractModal() + renderUserProfileModal() + renderCompressionModal() + renderUploadProgressModal() + (state.showAdminDashboard ? renderAdminDashboard() : '') + (state.showAppSettingsModal ? renderAppSettingsModal() : '') + (state.showManageFoldersModal ? renderManageFoldersModal() : '') + renderToast() + renderLoadingOverlay();
         }
 
         window.login = login;
@@ -8022,6 +8565,9 @@
         window.startCreateContest = startCreateContest;
         window.showContestCreationDisabledModal = showContestCreationDisabledModal;
         window.showRevotingDisabledModal = showRevotingDisabledModal;
+        window.showContestInfoModal = showContestInfoModal;
+        window.closeContestInfoModal = closeContestInfoModal;
+        window.shareContestFromModal = shareContestFromModal;
         window.handleContestTitle = handleContestTitle;
         window.confirmCreateWithDuplicateTitle = confirmCreateWithDuplicateTitle;
         window.cancelCreateContest = cancelCreateContest;
@@ -8205,7 +8751,7 @@
                 loadContests(),
                 loadMergers(),
                 loadExtracts(),
-                loadGroups(),
+                ensurePinnedFolder().then(() => loadGroups()),
                 loadAppSettings()
             ]);
             if (state.user) {
