@@ -98,7 +98,8 @@
                 const banCheckResponse = await fetch(`${SUPABASE_URL}/rest/v1/users?id=eq.${discordUser.id}&select=is_banned`, {
                     headers: {
                         'apikey': SUPABASE_ANON_KEY,
-                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                        'Cache-Control': 'no-cache'
                     }
                 });
 
@@ -122,7 +123,7 @@
                         ? `https://cdn.discordapp.com/avatars/${discordUser.id}/${discordUser.avatar}.png`
                         : `https://api.dicebear.com/7.x/avataaars/svg?seed=${discordUser.id}`,
                     accessToken: accessToken,
-                    expiresAt: Date.now() + (604800 * 1000) // 7 days
+                    expiresAt: Date.now() + (365 * 24 * 60 * 60 * 1000) // 1 year - persistent session
                 };
 
                 // Store in localStorage
@@ -137,7 +138,8 @@
                             'Content-Type': 'application/json',
                             'apikey': SUPABASE_ANON_KEY,
                             'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-                            'Prefer': 'resolution=merge-duplicates'
+                            'Prefer': 'resolution=merge-duplicates',
+                            'Cache-Control': 'no-cache'
                         },
                         body: JSON.stringify({
                             id: user.id,
@@ -161,8 +163,14 @@
                     // Don't throw - allow login to continue even if database insert fails
                 }
 
-                // Redirect to main app
-                window.location.href = '../index.html';
+                // Check for pending route and redirect accordingly
+                const pendingRoute = localStorage.getItem('peony_pending_route');
+                if (pendingRoute) {
+                    localStorage.removeItem('peony_pending_route');
+                    window.location.href = `../index.html#${pendingRoute}`;
+                } else {
+                    window.location.href = '../index.html';
+                }
 
             } catch (err) {
                 console.error('Auth error:', err);
