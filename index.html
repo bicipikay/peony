@@ -15823,8 +15823,8 @@
                                                     <span class="text-sm text-gray-700 truncate min-w-0 cursor-pointer hover:text-mauve-600" onclick="event.stopPropagation();viewUserProfile('${v.userId}');">${v.username}${v.isCurrentUser ? ' (You)' : ''}</span>${(v.autoA || v.autoB) ? renderAutoMarker(AUTO_LABEL_CLASSIC) : ''}
                                                 </span>
                                                 ${[[v.autoA, v.scoreA], [v.autoB, v.scoreB]].filter(([auto]) => auto).map(([, score]) => score === SHORTLISTED_AS_SCORE
-                                                    ? `<span class="font-bold text-lg leading-none flex-shrink-0" style="color: ${getScoreColor(5)};" title="Auto-converted: shortlisted">Shortlisted ✓</span>`
-                                                    : `<span class="font-bold text-lg leading-none flex-shrink-0" style="color: ${getScoreColor(1)};" title="Auto-converted: not shortlisted">Not Shortlisted ✗</span>`).join('')}
+                                                    ? `<span class="font-bold text-lg leading-none flex-shrink-0" style="color: ${getScoreColor(5)};" title="Auto-converted: shortlisted">✓</span>`
+                                                    : `<span class="font-bold text-lg leading-none flex-shrink-0" style="color: ${getScoreColor(1)};" title="Auto-converted: not shortlisted">✗</span>`).join('')}
                                             </div>
                                         `).join('')}
                                     </div>
@@ -15999,8 +15999,8 @@
                                                         </span>${vote.autoConverted ? renderAutoMarker(AUTO_LABEL_CLASSIC) : ''}
                                                         </span>
                                                         ${vote.autoConverted ? (vote.score === SHORTLISTED_AS_SCORE
-                                                            ? `<span class="font-bold text-lg leading-none flex-shrink-0" style="color: ${getScoreColor(5)};" title="Auto-converted: shortlisted">Shortlisted ✓</span>`
-                                                            : `<span class="font-bold text-lg leading-none flex-shrink-0" style="color: ${getScoreColor(1)};" title="Auto-converted: not shortlisted">Not shortlisted ✗</span>`) : ''}
+                                                            ? `<span class="font-bold text-lg leading-none flex-shrink-0" style="color: ${getScoreColor(5)};" title="Auto-converted: shortlisted">✓</span>`
+                                                            : `<span class="font-bold text-lg leading-none flex-shrink-0" style="color: ${getScoreColor(1)};" title="Auto-converted: not shortlisted">✗</span>`) : ''}
                                                         ${isAdmin && !vote.autoConverted && !hideAdminVoteTools() ? `
                                                             <button
                                                                 onclick="adminEditVote('${vote.userId}', ${item.id}, ${score})"
@@ -19461,7 +19461,7 @@
         }
 
         // ---------- Auto-converted marker (gray *) and explanatory label in the breakdown / pairs modals ----------
-        const AUTO_LABEL_CLASSIC = '* Auto-converted from shortlists: shortlisted images count as 4, all others as no vote. ✓ = shortlisted, ✗ = not shortlisted.';
+        const AUTO_LABEL_CLASSIC = '* Auto-converted from shortlists: shortlisted images count as 4, all others as no vote. ✓ = shortlisted.'; // ✗ = not shortlisted
         const AUTO_LABEL_SHORTLIST = '* Auto-converted from classic votes: scores 4-5 count as shortlisted, scores 1-3 as not shortlisted. The colored circle shows the score they gave.';
 
         // Directly after the username; never shrinks, so the name truncates first
