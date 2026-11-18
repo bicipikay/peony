@@ -18389,7 +18389,7 @@
         // same breakdown structure as real votes (flagged autoConverted: true) so every classic tab works unchanged, and
         // are never written to the database or counted by the leaderboard, profile modal, admin stats or voter_count.
         const SHORTLISTED_AS_SCORE = 4;
-        const NOT_SHORTLISTED_AS_SCORE = 2;
+        const NOT_SHORTLISTED_AS_SCORE = 0;
 
         // Scope (contests + images) of the classic results being loaded; independent of state.view
         function getClassicAutoScope(contest) {
