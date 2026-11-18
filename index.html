@@ -15823,8 +15823,8 @@
                                                     <span class="text-sm text-gray-700 truncate min-w-0 cursor-pointer hover:text-mauve-600" onclick="event.stopPropagation();viewUserProfile('${v.userId}');">${v.username}${v.isCurrentUser ? ' (You)' : ''}</span>${(v.autoA || v.autoB) ? renderAutoMarker(AUTO_LABEL_CLASSIC) : ''}
                                                 </span>
                                                 ${[[v.autoA, v.scoreA], [v.autoB, v.scoreB]].filter(([auto]) => auto).map(([, score]) => score === SHORTLISTED_AS_SCORE
-                                                    ? `<span class="font-bold text-lg leading-none flex-shrink-0" style="color: ${getScoreColor(5)};" title="Auto-converted: shortlisted">✓</span>`
-                                                    : `<span class="font-bold text-lg leading-none flex-shrink-0" style="color: ${getScoreColor(1)};" title="Auto-converted: not shortlisted">✗</span>`).join('')}
+                                                    ? `<span class="font-bold text-lg leading-none flex-shrink-0" style="color: ${getScoreColor(5)};" title="Auto-converted: shortlisted">Shortlisted ✓</span>`
+                                                    : `<span class="font-bold text-lg leading-none flex-shrink-0" style="color: ${getScoreColor(1)};" title="Auto-converted: not shortlisted">Not Shortlisted ✗</span>`).join('')}
                                             </div>
                                         `).join('')}
                                     </div>
@@ -15999,8 +15999,8 @@
                                                         </span>${vote.autoConverted ? renderAutoMarker(AUTO_LABEL_CLASSIC) : ''}
                                                         </span>
                                                         ${vote.autoConverted ? (vote.score === SHORTLISTED_AS_SCORE
-                                                            ? `<span class="font-bold text-lg leading-none flex-shrink-0" style="color: ${getScoreColor(5)};" title="Auto-converted: shortlisted">✓</span>`
-                                                            : `<span class="font-bold text-lg leading-none flex-shrink-0" style="color: ${getScoreColor(1)};" title="Auto-converted: not shortlisted">✗</span>`) : ''}
+                                                            ? `<span class="font-bold text-lg leading-none flex-shrink-0" style="color: ${getScoreColor(5)};" title="Auto-converted: shortlisted">Shortlisted ✓</span>`
+                                                            : `<span class="font-bold text-lg leading-none flex-shrink-0" style="color: ${getScoreColor(1)};" title="Auto-converted: not shortlisted">Not shortlisted ✗</span>`) : ''}
                                                         ${isAdmin && !vote.autoConverted && !hideAdminVoteTools() ? `
                                                             <button
                                                                 onclick="adminEditVote('${vote.userId}', ${item.id}, ${score})"
@@ -18389,7 +18389,7 @@
         // same breakdown structure as real votes (flagged autoConverted: true) so every classic tab works unchanged, and
         // are never written to the database or counted by the leaderboard, profile modal, admin stats or voter_count.
         const SHORTLISTED_AS_SCORE = 4;
-        const NOT_SHORTLISTED_AS_SCORE = 0;
+        // const NOT_SHORTLISTED_AS_SCORE = 2;
 
         // Scope (contests + images) of the classic results being loaded; independent of state.view
         function getClassicAutoScope(contest) {
@@ -18416,10 +18416,11 @@
                 if (realPairs.has(key)) return;   // has real classic votes in that contest: never converted
                 scope.images.forEach(img => {
                     if (img.contestId !== user.contestId) return;
+                    if (!shortlisted.has(`${user.userId}|${img.id}`)) return;   // not shortlisted = absent score
                     votes.push({
-                        userId: user.userId, username: user.username, avatar: user.avatar, imageId: img.id, contestId: user.contestId,
-                        score: shortlisted.has(`${user.userId}|${img.id}`) ? SHORTLISTED_AS_SCORE : NOT_SHORTLISTED_AS_SCORE
-                    });
+                        userId: user.userId, username: user.username, avatar: user.avatar,
+                        imageId: img.id, contestId: user.contestId, score: SHORTLISTED_AS_SCORE
+                     });
                 });
             });
             return votes;
@@ -18559,7 +18560,7 @@
                 : `Include auto-converted: 🔖→⭐ (+${count} shortlist ${noun})`;
             const hint = isShortlistFormat()
                 ? 'Classic voters are counted as shortlisting images they scored 4 or 5.'
-                : 'Shortlist voters are counted as 4 for shortlisted images and 2 for the rest.';
+                : 'Shortlist voters are counted as 4 for shortlisted images and no vote for the rest.';
             return `
                 <button onclick="setIncludeAutoConverted(${!on})" role="switch" aria-checked="${on}" title="${hint}" class="flex items-center justify-center gap-1.5 text-xs font-semibold text-gray-700 text-left max-w-full">
                     <span class="relative inline-block w-8 h-4 flex-shrink-0 rounded-full transition ${on ? 'bg-mauve-400' : 'bg-gray-300'}">
@@ -19460,7 +19461,7 @@
         }
 
         // ---------- Auto-converted marker (gray *) and explanatory label in the breakdown / pairs modals ----------
-        const AUTO_LABEL_CLASSIC = '* Auto-converted from shortlists: shortlisted images count as 4, all others as 2. ✓ = shortlisted, ✗ = not shortlisted.';
+        const AUTO_LABEL_CLASSIC = '* Auto-converted from shortlists: shortlisted images count as 4, all others as no vote. ✓ = shortlisted, ✗ = not shortlisted.';
         const AUTO_LABEL_SHORTLIST = '* Auto-converted from classic votes: scores 4-5 count as shortlisted, scores 1-3 as not shortlisted. The colored circle shows the score they gave.';
 
         // Directly after the username; never shrinks, so the name truncates first
